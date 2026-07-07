@@ -11,18 +11,48 @@ namespace SimpleMapper.Net;
 /// </summary>
 public static class SimpleMapperExtensions
 {
+    internal const string AotWarning =
+        "SimpleMapper.Net builds mapping code at runtime with reflection and compiled " +
+        "expression trees, which is incompatible with NativeAOT.";
+
+    internal const string TrimWarning =
+        "SimpleMapper.Net discovers members via reflection at runtime; trimming may " +
+        "remove mapped properties or constructors.";
+
     /// <summary>Maps by name convention. Zero configuration.</summary>
-    public static TTarget MapTo<TTarget>(this object source)
+    [RequiresDynamicCode(AotWarning)]
+    [RequiresUnreferencedCode(TrimWarning)]
+    [return: NotNullIfNotNull(nameof(source))]
+    public static TTarget? MapTo<TTarget>(this object? source)
     {
-        if (source is null) return default!;
-        return MapperEngine.Execute<TTarget>(source, MappingConfig.Default);
+        if (source is null) return default;
+        return MapperEngine.Execute<TTarget>(source, MappingConfig.Default)!;
     }
 
     /// <summary>Maps to a runtime-resolved target type. Zero configuration.</summary>
-    public static object MapTo(this object source, Type targetType)
+    [RequiresDynamicCode(AotWarning)]
+    [RequiresUnreferencedCode(TrimWarning)]
+    [return: NotNullIfNotNull(nameof(source))]
+    public static object? MapTo(this object? source, Type targetType)
     {
-        if (source is null) return default!;
+        if (source is null) return null;
         return MapperEngine.Execute(source, targetType, MappingConfig.Default);
+    }
+
+    /// <summary>
+    /// Maps by name convention onto an existing instance and returns it. Target
+    /// properties without a matching source member keep their current values.
+    /// A null source leaves the destination untouched.
+    /// </summary>
+    [RequiresDynamicCode(AotWarning)]
+    [RequiresUnreferencedCode(TrimWarning)]
+    public static TTarget MapTo<TTarget>(this object? source, TTarget destination)
+        where TTarget : class
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (source is null) return destination;
+        MapperEngine.ExecuteInto(source, destination, MappingConfig.Default);
+        return destination;
     }
 
     /// <summary>Starts a configurable mapping via the fluent builder.</summary>
@@ -43,6 +73,8 @@ public static class SimpleMapperExtensions
         => MapperEngine.RegisterSubtype<TSource>(discriminator, targetType);
 
     /// <summary>Maps every item of a collection to the target type.</summary>
+    [RequiresDynamicCode(AotWarning)]
+    [RequiresUnreferencedCode(TrimWarning)]
     public static List<TTarget> MapListTo<TTarget>(this IEnumerable source)
     {
         if (source is null) throw new ArgumentNullException(nameof(source));

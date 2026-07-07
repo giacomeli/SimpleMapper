@@ -27,6 +27,12 @@ public sealed record MappingConfig
     /// <summary>Prints the mapping tree to the console (diagnostic slow path).</summary>
     public bool DebugLogging { get; init; }
 
+    /// <summary>
+    /// Destination of the debug mapping tree. Null writes to the console (with
+    /// colors); any other writer receives plain text — useful in tests and servers.
+    /// </summary>
+    public System.IO.TextWriter? DebugWriter { get; init; }
+
     /// <summary>True when the config carries no overrides and the fast path can be used.</summary>
     public bool IsEmpty => IgnoredProperties.Count == 0
         && PropertyMappings.Count == 0

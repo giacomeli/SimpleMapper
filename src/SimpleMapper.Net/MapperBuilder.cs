@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq.Expressions;
 
 namespace SimpleMapper.Net;
@@ -16,6 +18,7 @@ public sealed class MapperBuilder<TSource>
     private readonly List<string[]> _ignoredPaths = new();
     private readonly List<(string[] Source, string[] Target)> _mappingPaths = new();
     private bool _debug;
+    private TextWriter? _debugWriter;
 
     internal MapperBuilder(TSource source) => _source = source;
 
@@ -89,7 +92,21 @@ public sealed class MapperBuilder<TSource>
         return this;
     }
 
+    /// <summary>
+    /// Writes the mapping tree to the given writer (plain text, no colors).
+    /// Diagnostic use only (slow path); useful in tests and server logs.
+    /// </summary>
+    public MapperBuilder<TSource> WithDebugLogging(TextWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        _debug = true;
+        _debugWriter = writer;
+        return this;
+    }
+
     /// <summary>Executes the configured mapping and returns the target instance.</summary>
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     public TTarget To<TTarget>()
     {
         if (_source is null)
@@ -99,12 +116,30 @@ public sealed class MapperBuilder<TSource>
     }
 
     /// <summary>Executes the configured mapping to a runtime-resolved target type.</summary>
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     public object To(Type targetType)
     {
         if (_source is null)
             throw new InvalidOperationException("Source cannot be null.");
 
         return MapperEngine.Execute(_source, targetType, BuildConfig());
+    }
+
+    /// <summary>
+    /// Executes the configured mapping onto an existing instance and returns it.
+    /// Subtype rules do not apply — the target already exists.
+    /// </summary>
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
+    public TTarget To<TTarget>(TTarget destination) where TTarget : class
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (_source is null)
+            throw new InvalidOperationException("Source cannot be null.");
+
+        MapperEngine.ExecuteInto(_source, destination, BuildConfig());
+        return destination;
     }
 
     private MappingConfig BuildConfig()
@@ -133,7 +168,7 @@ public sealed class MapperBuilder<TSource>
             node.Mappings[tgtPath[^1]] = srcPath[^1];
         }
 
-        return root.ToConfig(_debug);
+        return root.ToConfig(_debug) with { DebugWriter = _debugWriter };
     }
 
     private sealed class ConfigNode

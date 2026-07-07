@@ -23,20 +23,35 @@ internal static class TypedPlanBuilder
             Expression.Assign(tgtTyped, Expression.Convert(tgtParam, tgtType))
         };
 
-        var srcProps = srcType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
-            .ToDictionary(p => p.Name);
+        var srcMembers = GetReadableMembers(srcType);
+        var tgtMembers = GetWritableMembers(tgtType);
 
-        var tgtProps = tgtType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.CanWrite && p.GetIndexParameters().Length == 0)
-            .ToArray();
-
-        foreach (var tgtProp in tgtProps)
+        foreach (var (tgtMember, tgtMemberType) in tgtMembers)
         {
-            if (!srcProps.TryGetValue(tgtProp.Name, out var srcProp))
+            if (!srcMembers.TryGetValue(tgtMember.Name, out var src))
                 continue;
+            var (srcMember, srcMemberType) = src;
 
-            var assignment = BuildPropertyAssignment(srcTyped, tgtTyped, srcProp, tgtProp);
+            Expression? assignment;
+            try
+            {
+                assignment = BuildMemberAssignment(
+                    srcTyped, tgtTyped, srcMember, srcMemberType, tgtMember, tgtMemberType);
+            }
+            catch (MappingException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            {
+                throw MappingException.ForMember(
+                    srcType, srcMember.Name, srcMemberType,
+                    tgtType, tgtMember.Name, tgtMemberType,
+                    "the types are not compatible and no conversion is supported. " +
+                    "Rename or Ignore the property, or convert the value in your own code.",
+                    ex);
+            }
+
             if (assignment != null)
                 body.Add(assignment);
         }
@@ -48,97 +63,171 @@ internal static class TypedPlanBuilder
         return Expression.Lambda<Action<object, object>>(block, srcParam, tgtParam).Compile();
     }
 
-    private static Expression? BuildPropertyAssignment(
-        Expression srcTyped, Expression tgtTyped,
-        PropertyInfo srcProp, PropertyInfo tgtProp)
+    // Public instance properties (readable, non-indexed) and public instance fields.
+    private static Dictionary<string, (MemberInfo Member, Type Type)> GetReadableMembers(Type t)
     {
-        var srcAccess = Expression.Property(srcTyped, srcProp);
-        var tgtAccess = Expression.Property(tgtTyped, tgtProp);
-        var srcPropType = srcProp.PropertyType;
-        var tgtPropType = tgtProp.PropertyType;
+        var d = new Dictionary<string, (MemberInfo, Type)>();
+        foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            if (p.CanRead && p.GetIndexParameters().Length == 0)
+                d[p.Name] = (p, p.PropertyType);
+        foreach (var f in t.GetFields(BindingFlags.Public | BindingFlags.Instance))
+            d[f.Name] = (f, f.FieldType);
+        return d;
+    }
+
+    private static List<(MemberInfo Member, Type Type)> GetWritableMembers(Type t)
+    {
+        var list = new List<(MemberInfo, Type)>();
+        foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            if (p.CanWrite && p.GetIndexParameters().Length == 0)
+                list.Add((p, p.PropertyType));
+        foreach (var f in t.GetFields(BindingFlags.Public | BindingFlags.Instance))
+            if (!f.IsInitOnly && !f.IsLiteral)
+                list.Add((f, f.FieldType));
+        return list;
+    }
+
+    private static Expression? BuildMemberAssignment(
+        Expression srcTyped, Expression tgtTyped,
+        MemberInfo srcMember, Type srcMemberType,
+        MemberInfo tgtMember, Type tgtMemberType)
+    {
+        var srcAccess = Expression.MakeMemberAccess(srcTyped, srcMember);
+        var tgtAccess = Expression.MakeMemberAccess(tgtTyped, tgtMember);
+        var srcType = srcMember.DeclaringType!;
+        var tgtType = tgtMember.DeclaringType!;
 
         // Simple types (primitives, string, decimal, DateTime, Guid, enums, etc.)
-        if (MapperEngine.IsSimple(tgtPropType) && MapperEngine.IsSimple(srcPropType))
+        if (MapperEngine.IsSimple(tgtMemberType) && MapperEngine.IsSimple(srcMemberType))
         {
-            return BuildSimpleAssignment(srcAccess, tgtAccess, srcPropType, tgtPropType);
+            return BuildSimpleAssignment(srcAccess, tgtAccess, srcMemberType, tgtMemberType);
         }
 
-        // Dictionary: direct reference copy
-        if (typeof(IDictionary).IsAssignableFrom(tgtPropType))
+        // Dictionary: direct reference copy (documented behavior)
+        if (typeof(IDictionary).IsAssignableFrom(tgtMemberType))
         {
-            return BuildReferenceAssignment(srcAccess, tgtAccess, srcPropType, tgtPropType);
+            return BuildReferenceAssignment(srcAccess, tgtAccess, srcMemberType, tgtMemberType);
         }
 
-        // Collection (List<T>, IEnumerable but not string)
-        if (typeof(IEnumerable).IsAssignableFrom(tgtPropType) && tgtPropType != typeof(string))
+        // Collection (List<T>, T[], interfaces assignable from List<T>; not string)
+        if (typeof(IEnumerable).IsAssignableFrom(tgtMemberType) && tgtMemberType != typeof(string))
         {
-            return BuildCollectionAssignment(srcAccess, tgtAccess, srcPropType, tgtPropType);
+            return BuildCollectionAssignment(
+                srcAccess, tgtAccess, srcMember, srcMemberType, tgtMember, tgtMemberType);
         }
 
-        // Complex nested object
-        return BuildComplexAssignment(srcAccess, tgtAccess, srcPropType, tgtPropType);
+        // Untyped target: the target shape is unknowable, keep the reference.
+        if (tgtMemberType == typeof(object))
+        {
+            return BuildReferenceAssignment(srcAccess, tgtAccess, srcMemberType, tgtMemberType);
+        }
+
+        // Delegates cannot be instantiated by the mapper: keep the reference.
+        if (typeof(Delegate).IsAssignableFrom(tgtMemberType))
+        {
+            return BuildReferenceAssignment(srcAccess, tgtAccess, srcMemberType, tgtMemberType);
+        }
+
+        // Value-type (struct) targets: identical types are a plain value copy;
+        // anything else cannot be safely populated member-by-member — fail loudly
+        // instead of producing a silently zeroed struct.
+        if (tgtMemberType.IsValueType)
+        {
+            if (srcMemberType == tgtMemberType)
+                return BuildReferenceAssignment(srcAccess, tgtAccess, srcMemberType, tgtMemberType);
+
+            throw MappingException.ForMember(
+                srcType, srcMember.Name, srcMemberType,
+                tgtType, tgtMember.Name, tgtMemberType,
+                "the target is a value type (struct) and structs are only copied when " +
+                "source and target types are identical.");
+        }
+
+        // Complex nested object: always deep-map, including when source and target
+        // types are identical, so a mapped DTO never aliases the source graph.
+        return BuildComplexAssignment(srcAccess, tgtAccess, srcMemberType, tgtMemberType);
     }
 
     private static Expression BuildSimpleAssignment(
         Expression srcAccess, MemberExpression tgtAccess,
-        Type srcPropType, Type tgtPropType)
+        Type srcMemberType, Type tgtMemberType)
     {
         // Same type: direct assignment, no boxing for value types
-        if (srcPropType == tgtPropType)
+        if (srcMemberType == tgtMemberType)
         {
             return Expression.Assign(tgtAccess, srcAccess);
         }
 
         // Nullable<T> source -> T target or Nullable<T> target
-        var srcUnderlying = Nullable.GetUnderlyingType(srcPropType);
-        var tgtUnderlying = Nullable.GetUnderlyingType(tgtPropType);
+        var srcUnderlying = Nullable.GetUnderlyingType(srcMemberType);
+        var tgtUnderlying = Nullable.GetUnderlyingType(tgtMemberType);
 
         // Both are the same underlying type (e.g. int? -> int? or int -> int?)
-        var srcCore = srcUnderlying ?? srcPropType;
-        var tgtCore = tgtUnderlying ?? tgtPropType;
+        var srcCore = srcUnderlying ?? srcMemberType;
+        var tgtCore = tgtUnderlying ?? tgtMemberType;
 
         if (srcCore == tgtCore)
         {
             // int -> int? or int? -> int etc.
-            return Expression.Assign(tgtAccess, Expression.Convert(srcAccess, tgtPropType));
+            return Expression.Assign(tgtAccess, Expression.Convert(srcAccess, tgtMemberType));
         }
 
-        // Numeric coercion (int -> long, float -> double, etc.)
-        return Expression.Assign(tgtAccess, Expression.Convert(srcAccess, tgtPropType));
+        // Numeric coercion (int -> long, float -> double, etc.). Incompatible pairs
+        // (string -> double, int -> string, ...) throw here and are wrapped with the
+        // member context by Build().
+        return Expression.Assign(tgtAccess, Expression.Convert(srcAccess, tgtMemberType));
     }
 
     private static Expression BuildReferenceAssignment(
         Expression srcAccess, MemberExpression tgtAccess,
-        Type srcPropType, Type tgtPropType)
+        Type srcMemberType, Type tgtMemberType)
     {
         // For reference types, null-check the source
-        if (!srcPropType.IsValueType)
+        if (!srcMemberType.IsValueType)
         {
             return Expression.IfThen(
-                Expression.NotEqual(srcAccess, Expression.Constant(null, srcPropType)),
+                Expression.NotEqual(srcAccess, Expression.Constant(null, srcMemberType)),
                 Expression.Assign(tgtAccess,
-                    tgtPropType.IsAssignableFrom(srcPropType)
+                    tgtMemberType.IsAssignableFrom(srcMemberType)
                         ? srcAccess
-                        : Expression.Convert(srcAccess, tgtPropType)));
+                        : Expression.Convert(srcAccess, tgtMemberType)));
         }
 
         return Expression.Assign(tgtAccess,
-            tgtPropType.IsAssignableFrom(srcPropType)
+            tgtMemberType.IsAssignableFrom(srcMemberType)
                 ? srcAccess
-                : Expression.Convert(srcAccess, tgtPropType));
+                : Expression.Convert(srcAccess, tgtMemberType));
     }
 
     private static Expression BuildCollectionAssignment(
         Expression srcAccess, MemberExpression tgtAccess,
-        Type srcPropType, Type tgtPropType)
+        MemberInfo srcMember, Type srcMemberType,
+        MemberInfo tgtMember, Type tgtMemberType)
     {
-        var srcItemType = GetCollectionItemType(srcPropType);
-        var tgtItemType = GetCollectionItemType(tgtPropType);
+        var srcItemType = GetCollectionItemType(srcMemberType);
+        var tgtItemType = GetCollectionItemType(tgtMemberType);
 
         if (srcItemType == null || tgtItemType == null)
         {
-            // Fall back to direct reference copy
-            return BuildReferenceAssignment(srcAccess, tgtAccess, srcPropType, tgtPropType);
+            throw MappingException.ForMember(
+                srcMember.DeclaringType!, srcMember.Name, srcMemberType,
+                tgtMember.DeclaringType!, tgtMember.Name, tgtMemberType,
+                "the collection item type could not be resolved. Non-generic collections " +
+                "(e.g. ArrayList) are not supported; use a typed collection.");
+        }
+
+        // The mapper materializes List<T> (or T[]): the target member must be able
+        // to hold one. Reject unsupported shapes (HashSet<T>, immutable collections,
+        // custom collections) at plan build instead of a runtime InvalidCastException.
+        if (!tgtMemberType.IsArray &&
+            !tgtMemberType.IsAssignableFrom(typeof(List<>).MakeGenericType(tgtItemType)))
+        {
+            throw MappingException.ForMember(
+                srcMember.DeclaringType!, srcMember.Name, srcMemberType,
+                tgtMember.DeclaringType!, tgtMember.Name, tgtMemberType,
+                "the target collection type is not supported. Supported targets: T[], " +
+                "List<T> and interfaces a List<T> satisfies (IEnumerable<T>, IList<T>, " +
+                "ICollection<T>, IReadOnlyList<T>, IReadOnlyCollection<T>).");
         }
 
         // Build call to MapCollectionTyped<TSrc, TTgt>(srcAccess, targetIsArray, itemIsSimple)
@@ -146,21 +235,21 @@ internal static class TypedPlanBuilder
             .GetMethod(nameof(MapCollectionTyped), BindingFlags.NonPublic | BindingFlags.Static)!
             .MakeGenericMethod(srcItemType, tgtItemType);
 
-        bool targetIsArray = tgtPropType.IsArray;
+        bool targetIsArray = tgtMemberType.IsArray;
         bool isSimple = MapperEngine.IsSimple(tgtItemType);
 
-        Expression srcAsObject = srcPropType.IsValueType
+        Expression srcAsObject = srcMemberType.IsValueType
             ? Expression.Convert(srcAccess, typeof(object))
             : (Expression)srcAccess;
 
         var callExpr = Expression.Convert(
             Expression.Call(helperMethod, srcAsObject, Expression.Constant(targetIsArray), Expression.Constant(isSimple)),
-            tgtPropType);
+            tgtMemberType);
 
-        if (!srcPropType.IsValueType)
+        if (!srcMemberType.IsValueType)
         {
             return Expression.IfThen(
-                Expression.NotEqual(srcAccess, Expression.Constant(null, srcPropType)),
+                Expression.NotEqual(srcAccess, Expression.Constant(null, srcMemberType)),
                 Expression.Assign(tgtAccess, callExpr));
         }
 
@@ -169,31 +258,25 @@ internal static class TypedPlanBuilder
 
     private static Expression BuildComplexAssignment(
         Expression srcAccess, MemberExpression tgtAccess,
-        Type srcPropType, Type tgtPropType)
+        Type srcMemberType, Type tgtMemberType)
     {
-        // If same type, just reference copy
-        if (srcPropType == tgtPropType)
-        {
-            return BuildReferenceAssignment(srcAccess, tgtAccess, srcPropType, tgtPropType);
-        }
-
         var helperMethod = typeof(TypedPlanBuilder)
             .GetMethod(nameof(MapComplexObject), BindingFlags.NonPublic | BindingFlags.Static)!;
 
-        Expression srcAsObject = srcPropType.IsValueType
+        Expression srcAsObject = srcMemberType.IsValueType
             ? Expression.Convert(srcAccess, typeof(object))
             : (Expression)srcAccess;
 
         var callExpr = Expression.Convert(
             Expression.Call(helperMethod,
                 srcAsObject,
-                Expression.Constant(tgtPropType, typeof(Type))),
-            tgtPropType);
+                Expression.Constant(tgtMemberType, typeof(Type))),
+            tgtMemberType);
 
-        if (!srcPropType.IsValueType)
+        if (!srcMemberType.IsValueType)
         {
             return Expression.IfThen(
-                Expression.NotEqual(srcAccess, Expression.Constant(null, srcPropType)),
+                Expression.NotEqual(srcAccess, Expression.Constant(null, srcMemberType)),
                 Expression.Assign(tgtAccess, callExpr));
         }
 
@@ -205,6 +288,17 @@ internal static class TypedPlanBuilder
     private static object MapComplexObject(object src, Type tgtType)
     {
         if (src == null) return null!;
+        if (tgtType == typeof(object) || typeof(Delegate).IsAssignableFrom(tgtType))
+            return src;
+        if (tgtType.IsValueType)
+        {
+            if (src.GetType() == tgtType) return src;
+            throw new MappingException(
+                $"Cannot map {src.GetType().Name} -> {tgtType.Name}: the target is a value " +
+                "type (struct) and structs are only copied when source and target types " +
+                "are identical.");
+        }
+
         MapperEngine.EnterMapping();
         try
         {
@@ -225,7 +319,10 @@ internal static class TypedPlanBuilder
         foreach (var item in enumerable)
         {
             if (item == null) { result.Add(default!); continue; }
-            if (itemIsSimple || typeof(TSrc) == typeof(TTgt))
+            // Simple items and identical value types are plain copies; identical
+            // reference types are deep-mapped like any other complex object so the
+            // mapped collection never aliases the source items.
+            if (itemIsSimple || (typeof(TSrc) == typeof(TTgt) && typeof(TSrc).IsValueType))
                 result.Add((TTgt)(object)item!);
             else
                 result.Add((TTgt)MapComplexObject(item, typeof(TTgt)));

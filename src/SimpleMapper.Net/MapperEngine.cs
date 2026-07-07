@@ -23,15 +23,18 @@ internal static class MapperEngine
 
     internal enum PropertyKind : byte { Simple, Dictionary, Collection, Complex }
 
+    // Get is null when the source type has no same-name member: the property can
+    // still be fed through a per-call rename on the dynamic path.
     internal sealed record PropertyPlan(
         string Name,
-        Func<object, object?> Get,
+        Func<object, object?>? Get,
         Action<object, object?> Set,
         bool SkipIfNull,
         PropertyKind Kind,
         Type? CollectionItemType,
         Func<IList>? CreateList,
-        bool ItemIsSimple);
+        bool ItemIsSimple,
+        bool TargetIsArray);
 
     internal sealed record TypePlan(
         Func<object> CreateTarget,
@@ -84,34 +87,12 @@ internal static class MapperEngine
     }
 
     public static TTarget Execute<TTarget>(object source, MappingConfig cfg)
-    {
-        var resolvedType = ResolveSubtype(source, typeof(TTarget));
-        var useFast = !cfg.DebugLogging && cfg.PropertyMappings.Count == 0
-            && cfg.ChildConfigs.Count == 0;
-
-        if (useFast)
-        {
-            var pair = TypedMapperCache.GetOrBuild(source.GetType(), resolvedType);
-            var target = pair.CreateTarget();
-            MapPropertiesFast(source, target, cfg);
-            return (TTarget)target;
-        }
-
-        var plan = PlanCache.GetOrAdd((source.GetType(), resolvedType),
-            key => BuildPlan(key.src, key.tgt));
-        var tgt = plan.CreateTarget();
-
-        if (cfg.DebugLogging)
-            MapPropertiesDebug(source, tgt, cfg, 0, new HashSet<object>(ReferenceEqualityComparer.Instance));
-        else
-            MapPropertiesDynamic(source, tgt, cfg, plan);
-
-        return (TTarget)tgt;
-    }
+        => (TTarget)Execute(source, typeof(TTarget), cfg);
 
     public static object Execute(object source, Type targetType, MappingConfig cfg)
     {
         var resolvedType = ResolveSubtype(source, targetType);
+        ThrowIfValueTypeTarget(resolvedType);
         var useFast = !cfg.DebugLogging && cfg.PropertyMappings.Count == 0
             && cfg.ChildConfigs.Count == 0;
 
@@ -128,11 +109,45 @@ internal static class MapperEngine
         var tgt = plan.CreateTarget();
 
         if (cfg.DebugLogging)
-            MapPropertiesDebug(source, tgt, cfg, 0, new HashSet<object>(ReferenceEqualityComparer.Instance));
+            MapPropertiesDebug(source, tgt, cfg, 0,
+                new HashSet<object>(ReferenceEqualityComparer.Instance), cfg.DebugWriter ?? Console.Out);
         else
             MapPropertiesDynamic(source, tgt, cfg, plan);
 
         return tgt;
+    }
+
+    /// <summary>
+    /// Maps onto an existing target instance instead of creating one. Used by
+    /// MapTo(destination) and MapperBuilder.To(destination); subtype rules do not
+    /// apply because the target already exists.
+    /// </summary>
+    public static void ExecuteInto(object source, object target, MappingConfig cfg)
+    {
+        var useFast = !cfg.DebugLogging && cfg.PropertyMappings.Count == 0
+            && cfg.ChildConfigs.Count == 0;
+
+        if (useFast)
+        {
+            MapPropertiesFast(source, target, cfg);
+            return;
+        }
+
+        if (cfg.DebugLogging)
+            MapPropertiesDebug(source, target, cfg, 0,
+                new HashSet<object>(ReferenceEqualityComparer.Instance), cfg.DebugWriter ?? Console.Out);
+        else
+            MapPropertiesDynamic(source, target, cfg);
+    }
+
+    private static void ThrowIfValueTypeTarget(Type targetType)
+    {
+        if (targetType.IsValueType)
+            throw new NotSupportedException(
+                $"SimpleMapper.Net maps class-to-class; target type '{targetType.Name}' is a " +
+                "value type (struct). Mutating a boxed struct member-by-member cannot work " +
+                "reliably, so structs are rejected instead of returning silently zeroed data. " +
+                "Construct the struct manually or use a class DTO.");
     }
 
     // ---- Fast path (no debug, no allocations) ----
@@ -160,7 +175,7 @@ internal static class MapperEngine
         {
             var p = props[i];
 
-            if (cfg.IgnoredProperties.Contains(p.Name))
+            if (p.Get is null || cfg.IgnoredProperties.Contains(p.Name))
                 continue;
 
             var val = p.Get(src);
@@ -183,7 +198,7 @@ internal static class MapperEngine
                     {
                         var itemCfg = cfg.ForChild(p.Name).ForCollectionItem();
                         p.Set(tgt, MapCollectionFast((IEnumerable)val, p.CollectionItemType!,
-                            p.CreateList, p.ItemIsSimple, itemCfg));
+                            p.CreateList, p.ItemIsSimple, p.TargetIsArray, itemCfg));
                     }
                     break;
 
@@ -203,15 +218,24 @@ internal static class MapperEngine
     }
 
     private static object MapCollectionFast(IEnumerable srcCol, Type itemType,
-        Func<IList> createList, bool itemIsSimple, MappingConfig cfg)
+        Func<IList> createList, bool itemIsSimple, bool targetIsArray, MappingConfig cfg)
     {
         var list = createList();
 
         foreach (var it in srcCol)
         {
-            if (it == null || itemIsSimple)
+            if (it == null || itemIsSimple || itemType == typeof(object)
+                || typeof(Delegate).IsAssignableFrom(itemType)
+                || (itemType.IsValueType && it.GetType() == itemType))
             {
                 list.Add(it);
+            }
+            else if (itemType.IsValueType)
+            {
+                throw new MappingException(
+                    $"Cannot map collection item {it.GetType().Name} -> {itemType.Name}: the " +
+                    "target is a value type (struct) and structs are only copied when source " +
+                    "and target types are identical.");
             }
             else
             {
@@ -222,6 +246,13 @@ internal static class MapperEngine
                 MapPropertiesFast(it, inner, cfg, innerPlan);
                 list.Add(inner);
             }
+        }
+
+        if (targetIsArray)
+        {
+            var array = Array.CreateInstance(itemType, list.Count);
+            list.CopyTo(array, 0);
+            return array;
         }
 
         return list;
@@ -272,7 +303,7 @@ internal static class MapperEngine
                     {
                         var itemCfg = cfg.ForChild(p.Name).ForCollectionItem();
                         p.Set(tgt, MapCollectionFast((IEnumerable)val, p.CollectionItemType!,
-                            p.CreateList, p.ItemIsSimple, itemCfg));
+                            p.CreateList, p.ItemIsSimple, p.TargetIsArray, itemCfg));
                     }
                     break;
 
@@ -294,7 +325,7 @@ internal static class MapperEngine
     // ---- Debug path (preserves TreeConsole output) ----
 
     private static void MapPropertiesDebug(object src, object tgt, MappingConfig cfg,
-        int depth, HashSet<object>? visited)
+        int depth, HashSet<object>? visited, System.IO.TextWriter w)
     {
         EnterMapping();
         try
@@ -310,14 +341,14 @@ internal static class MapperEngine
 
             if (cfg.IgnoredProperties.Contains(tgtName))
             {
-                TreeConsole.WriteNode("(ign) " + Path(tgtName, tgt), depth, last, ConsoleColor.DarkGray);
+                TreeConsole.WriteNode(w, "(ign) " + Path(tgtName, tgt), depth, last, ConsoleColor.DarkGray);
                 continue;
             }
 
             var srcName = cfg.PropertyMappings.TryGetValue(tgtName, out var map) ? map : tgtName;
             if (!srcGet.TryGetValue(srcName, out var getter))
             {
-                TreeConsole.WriteNode("(miss) " + Path(srcName, src) + " -> " + Path(tgtName, tgt), depth, last, ConsoleColor.DarkRed);
+                TreeConsole.WriteNode(w, "(miss) " + Path(srcName, src) + " -> " + Path(tgtName, tgt), depth, last, ConsoleColor.DarkRed);
                 continue;
             }
 
@@ -325,12 +356,12 @@ internal static class MapperEngine
 
             if (val is null && info.SkipIfNull)
             {
-                TreeConsole.WriteNode("(warn) " + Path(srcName, src) + " -> " + Path(tgtName, tgt) + "  null on non-nullable -> skipped", depth, last, ConsoleColor.DarkYellow);
+                TreeConsole.WriteNode(w, "(warn) " + Path(srcName, src) + " -> " + Path(tgtName, tgt) + "  null on non-nullable -> skipped", depth, last, ConsoleColor.DarkYellow);
                 continue;
             }
 
             var label = Path(srcName, src) + " -> " + Path(tgtName, tgt) + "  (" + TreeConsole.PrettyValue(val) + ")";
-            TreeConsole.WriteNode(label, depth, last, ConsoleColor.Green);
+            TreeConsole.WriteNode(w, label, depth, last, ConsoleColor.Green);
 
             if (val == null || IsSimple(val.GetType()))
             {
@@ -343,13 +374,13 @@ internal static class MapperEngine
             else if (val is IEnumerable en && val.GetType() != typeof(string))
             {
                 var collChildCfg = cfg.ForChild(tgtName).ForCollectionItem();
-                var mapped = MapCollectionDebug(en, info.TargetType, collChildCfg, depth + 1, visited);
+                var mapped = MapCollectionDebug(en, info.TargetType, collChildCfg, depth + 1, visited, w);
                 info.Set(tgt, mapped);
             }
             else
             {
                 var complexChildCfg = cfg.ForChild(tgtName);
-                var mapped = MapComplexDebug(val, info.TargetType, complexChildCfg, depth + 1, visited);
+                var mapped = MapComplexDebug(val, info.TargetType, complexChildCfg, depth + 1, visited, w);
                 info.Set(tgt, mapped);
             }
         }
@@ -358,11 +389,11 @@ internal static class MapperEngine
     }
 
     private static object? MapComplexDebug(object srcObj, Type tgtType, MappingConfig cfg,
-        int depth, HashSet<object>? visited)
+        int depth, HashSet<object>? visited, System.IO.TextWriter w)
     {
         if (tgtType == typeof(object) || tgtType.IsAssignableFrom(srcObj.GetType()))
         {
-            DumpObject(srcObj, depth, visited);
+            DumpObject(srcObj, depth, visited, w);
             return srcObj;
         }
 
@@ -371,12 +402,12 @@ internal static class MapperEngine
         var plan = PlanCache.GetOrAdd((srcObj.GetType(), tgtType),
             key => BuildPlan(key.src, key.tgt));
         var tgtObj = plan.CreateTarget();
-        MapPropertiesDebug(srcObj, tgtObj, cfg, depth, visited);
+        MapPropertiesDebug(srcObj, tgtObj, cfg, depth, visited, w);
         return tgtObj;
     }
 
     private static object? MapCollectionDebug(IEnumerable srcCol, Type tgtColType,
-        MappingConfig cfg, int depth, HashSet<object>? visited)
+        MappingConfig cfg, int depth, HashSet<object>? visited, System.IO.TextWriter w)
     {
         var itemType = tgtColType.IsGenericType
             ? tgtColType.GetGenericArguments()[0]
@@ -392,11 +423,11 @@ internal static class MapperEngine
             var it = items[i];
             bool last = i == items.Count - 1;
 
-            TreeConsole.WriteNode("[" + i + "] = " + TreeConsole.PrettyValue(it), depth, last, ConsoleColor.Yellow);
+            TreeConsole.WriteNode(w, "[" + i + "] = " + TreeConsole.PrettyValue(it), depth, last, ConsoleColor.Yellow);
 
             list.Add(it == null || IsSimple(it.GetType())
                 ? it
-                : MapComplexDebug(it, itemType, cfg, depth + 1, visited));
+                : MapComplexDebug(it, itemType, cfg, depth + 1, visited, w));
         }
 
         return list;
@@ -445,25 +476,54 @@ internal static class MapperEngine
     {
         var getters = GettersCache.GetOrAdd(srcType, BuildGetters);
         var setters = SettersCache.GetOrAdd(tgtType, BuildSetters);
+        var srcMemberTypes = BuildReadableMemberTypes(srcType);
 
-        var factory = ResolveFactory(tgtType);
+        var factory = TypedMapperCache.BuildFactory(tgtType);
 
         var props = new List<PropertyPlan>();
         foreach (var (tgtName, info) in setters)
         {
-            if (!getters.TryGetValue(tgtName, out var getter)) continue;
+            // Unmatched target members stay in the plan without a getter so a
+            // per-call rename can still feed them on the dynamic path.
+            var matched = getters.TryGetValue(tgtName, out var getter);
 
             var kind = ClassifyProperty(info.TargetType);
             Type? itemType = null;
             Func<IList>? createList = null;
             bool itemIsSimple = false;
+            bool targetIsArray = false;
 
             if (kind == PropertyKind.Collection)
             {
-                itemType = info.TargetType.IsGenericType
-                    ? info.TargetType.GetGenericArguments()[0]
-                    : null;
-                if (itemType != null)
+                targetIsArray = info.TargetType.IsArray;
+                itemType = targetIsArray
+                    ? info.TargetType.GetElementType()
+                    : info.TargetType.IsGenericType
+                        ? info.TargetType.GetGenericArguments()[0]
+                        : null;
+
+                if (itemType == null)
+                {
+                    if (matched)
+                        throw MappingException.ForMember(
+                            srcType, tgtName, srcMemberTypes.GetValueOrDefault(tgtName, typeof(object)),
+                            tgtType, tgtName, info.TargetType,
+                            "the collection item type could not be resolved. Non-generic " +
+                            "collections (e.g. ArrayList) are not supported; use a typed collection.");
+                }
+                else if (!targetIsArray
+                    && !info.TargetType.IsAssignableFrom(typeof(List<>).MakeGenericType(itemType)))
+                {
+                    if (matched)
+                        throw MappingException.ForMember(
+                            srcType, tgtName, srcMemberTypes.GetValueOrDefault(tgtName, typeof(object)),
+                            tgtType, tgtName, info.TargetType,
+                            "the target collection type is not supported. Supported targets: T[], " +
+                            "List<T> and interfaces a List<T> satisfies (IEnumerable<T>, IList<T>, " +
+                            "ICollection<T>, IReadOnlyList<T>, IReadOnlyCollection<T>).");
+                    itemType = null;
+                }
+                else
                 {
                     var listType = typeof(List<>).MakeGenericType(itemType);
                     createList = () => (IList)Activator.CreateInstance(listType)!;
@@ -472,30 +532,50 @@ internal static class MapperEngine
             }
             else if (kind == PropertyKind.Complex)
             {
-                // Store the target type for complex properties
-                itemType = info.TargetType;
+                if (info.TargetType == typeof(object)
+                    || typeof(Delegate).IsAssignableFrom(info.TargetType))
+                {
+                    // The target shape is unknowable (object) or cannot be
+                    // instantiated by the mapper (delegate): keep the reference.
+                    kind = PropertyKind.Simple;
+                }
+                else if (info.TargetType.IsValueType)
+                {
+                    // Identical structs are a plain (boxed) value copy; anything else
+                    // cannot be populated member-by-member — fail loudly instead of
+                    // producing a silently zeroed struct.
+                    if (srcMemberTypes.GetValueOrDefault(tgtName) == info.TargetType || !matched)
+                        kind = PropertyKind.Simple;
+                    else
+                        throw MappingException.ForMember(
+                            srcType, tgtName, srcMemberTypes.GetValueOrDefault(tgtName, typeof(object)),
+                            tgtType, tgtName, info.TargetType,
+                            "the target is a value type (struct) and structs are only copied " +
+                            "when source and target types are identical.");
+                }
+                else
+                {
+                    // Store the target type for complex properties
+                    itemType = info.TargetType;
+                }
             }
 
-            props.Add(new PropertyPlan(tgtName, getter, info.Set, info.SkipIfNull,
-                kind, itemType, createList, itemIsSimple));
+            props.Add(new PropertyPlan(tgtName, matched ? getter : null, info.Set, info.SkipIfNull,
+                kind, itemType, createList, itemIsSimple, targetIsArray));
         }
 
         return new TypePlan(factory, props.ToArray());
     }
 
-    private static Func<object> ResolveFactory(Type t)
+    private static Dictionary<string, Type> BuildReadableMemberTypes(Type t)
     {
-        try
-        {
-            var test = Activator.CreateInstance(t);
-            return () => Activator.CreateInstance(t)!;
-        }
-        catch
-        {
-            // No usable constructor: create the instance without invoking any
-            // constructor and let the mapper populate the members directly.
-            return () => RuntimeHelpers.GetUninitializedObject(t);
-        }
+        var d = new Dictionary<string, Type>();
+        foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            if (p.CanRead && p.GetIndexParameters().Length == 0)
+                d[p.Name] = p.PropertyType;
+        foreach (var f in t.GetFields(BindingFlags.Public | BindingFlags.Instance))
+            d[f.Name] = f.FieldType;
+        return d;
     }
 
     private static PropertyKind ClassifyProperty(Type targetType)
@@ -509,7 +589,7 @@ internal static class MapperEngine
 
     // ---- Dump helpers (debug only) ----
 
-    private static void DumpObject(object obj, int depth, HashSet<object>? visited)
+    private static void DumpObject(object obj, int depth, HashSet<object>? visited, System.IO.TextWriter w)
     {
         if (visited == null || !visited.Add(obj)) return;
 
@@ -526,18 +606,18 @@ internal static class MapperEngine
             object? val;
             try { val = p.GetValue(obj); } catch { continue; }
 
-            TreeConsole.WriteNode(obj.GetType().Name + "." + p.Name + " = " + TreeConsole.PrettyValue(val), depth, last, IsSimple(p.PropertyType) ? ConsoleColor.Cyan : null);
+            TreeConsole.WriteNode(w, obj.GetType().Name + "." + p.Name + " = " + TreeConsole.PrettyValue(val), depth, last, IsSimple(p.PropertyType) ? ConsoleColor.Cyan : null);
 
             if (val == null || IsSimple(val.GetType())) continue;
 
             if (val is IEnumerable en && val.GetType() != typeof(string))
-                DumpCollection(en, depth + 1, visited);
+                DumpCollection(en, depth + 1, visited, w);
             else
-                DumpObject(val, depth + 1, visited);
+                DumpObject(val, depth + 1, visited, w);
         }
     }
 
-    private static void DumpCollection(IEnumerable en, int depth, HashSet<object> visited)
+    private static void DumpCollection(IEnumerable en, int depth, HashSet<object> visited, System.IO.TextWriter w)
     {
         var list = en.Cast<object?>().ToList();
         for (int i = 0; i < list.Count; i++)
@@ -545,10 +625,10 @@ internal static class MapperEngine
             var it = list[i];
             bool last = i == list.Count - 1;
 
-            TreeConsole.WriteNode("[" + i + "] = " + TreeConsole.PrettyValue(it), depth, last, ConsoleColor.Yellow);
+            TreeConsole.WriteNode(w, "[" + i + "] = " + TreeConsole.PrettyValue(it), depth, last, ConsoleColor.Yellow);
 
             if (it != null && !IsSimple(it.GetType()))
-                DumpObject(it, depth + 1, visited);
+                DumpObject(it, depth + 1, visited, w);
         }
     }
 
@@ -577,6 +657,7 @@ internal static class MapperEngine
         }
         foreach (var f in t.GetFields(BindingFlags.Public | BindingFlags.Instance))
         {
+            if (f.IsInitOnly || f.IsLiteral) continue;
             bool skipIfNull = ctx.Create(f).WriteState != NullabilityState.Nullable;
             d[f.Name] = new SetterInfo(BuildFieldSetter(t, f), f.FieldType, skipIfNull);
         }
@@ -613,6 +694,14 @@ internal static class MapperEngine
         return Expression.Lambda<Action<object, object?>>(assign, inst, val).Compile();
     }
 
+    // Coercion goes through Convert.ChangeType with the invariant culture: a mapping
+    // must not change meaning ("1.5" -> 15) when the process culture changes.
+    private static readonly MethodInfo ChangeTypeMethod = typeof(Convert).GetMethod(
+        nameof(Convert.ChangeType), new[] { typeof(object), typeof(Type), typeof(IFormatProvider) })!;
+
+    private static readonly ConstantExpression InvariantCulture = Expression.Constant(
+        System.Globalization.CultureInfo.InvariantCulture, typeof(IFormatProvider));
+
     private static Expression BuildSetterAssign(MemberExpression member, ParameterExpression val, Type targetType)
     {
         if (targetType == typeof(object))
@@ -627,10 +716,8 @@ internal static class MapperEngine
                     Expression.Equal(val, Expression.Constant(null, typeof(object))),
                     Expression.Default(targetType),
                     Expression.Convert(
-                        Expression.Call(
-                            typeof(Convert).GetMethod(nameof(Convert.ChangeType), new[] { typeof(object), typeof(Type) })!,
-                            val,
-                            Expression.Constant(underlyingType)),
+                        Expression.Call(ChangeTypeMethod, val,
+                            Expression.Constant(underlyingType), InvariantCulture),
                         targetType)));
         }
 
@@ -642,10 +729,8 @@ internal static class MapperEngine
                     Expression.TypeIs(val, targetType),
                     Expression.Unbox(val, targetType),
                     Expression.Convert(
-                        Expression.Call(
-                            typeof(Convert).GetMethod(nameof(Convert.ChangeType), new[] { typeof(object), typeof(Type) })!,
-                            val,
-                            Expression.Constant(targetType)),
+                        Expression.Call(ChangeTypeMethod, val,
+                            Expression.Constant(targetType), InvariantCulture),
                         targetType)));
         }
 

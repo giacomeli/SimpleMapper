@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace SimpleMapper.Net;
@@ -9,20 +10,21 @@ internal static class TreeConsole
 {
     private const int MaxScalarLen = 80;
 
-    public static void WriteNode(string label, int depth, bool last, ConsoleColor? color = null)
+    public static void WriteNode(TextWriter w, string label, int depth, bool last, ConsoleColor? color = null)
     {
         var prefix = Prefix(depth, last);
-        Console.Write(prefix);
-        if (color.HasValue)
+        w.Write(prefix);
+        // Colors only make sense on the real console; custom writers get plain text.
+        if (color.HasValue && ReferenceEquals(w, Console.Out))
         {
             var prev = Console.ForegroundColor;
             Console.ForegroundColor = color.Value;
-            Console.WriteLine(label);
+            w.WriteLine(label);
             Console.ForegroundColor = prev;
         }
         else
         {
-            Console.WriteLine(label);
+            w.WriteLine(label);
         }
     }
 

@@ -24,7 +24,10 @@ internal static class TypedMapperCache
         });
     }
 
-    private static Func<object> BuildFactory(Type t)
+    // Shared by the typed and the plan-based engines so both resolve constructors
+    // identically (public or non-public parameterless ctor, otherwise uninitialized
+    // instance) and neither invokes a constructor as a side effect of plan building.
+    internal static Func<object> BuildFactory(Type t)
     {
         var ctor = t.GetConstructor(
             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
