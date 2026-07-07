@@ -34,6 +34,8 @@ docker compose -f docker-compose.benchmarks.yml up --build   # reproducible benc
 # Docker VM with fewer resources: BENCH_CPUS=1 BENCH_MEM=2g docker compose ... up
 ```
 
+**Releasing**: publishing goes through `.github/workflows/publish.yml` (Trusted Publishing / OIDC — no stored API key). Cut a GitHub Release tagged `vX.Y.Z`; the workflow derives the package version from the tag, runs the suite, then packs and pushes `nupkg`+`snupkg`. Do not add a NuGet API key secret. See the README "Publishing" section for the one-time nuget.org policy setup.
+
 ## Architecture
 
 Full internals documentation: `docs/architecture.md` — read it before touching the engine. Summary: `MapperEngine.Execute` selects one of three execution paths:

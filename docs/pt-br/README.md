@@ -307,6 +307,32 @@ dotnet test SimpleMapper.Net.slnx               # precisa estar verde
 
 ## Publicação (mantenedores)
 
+### Trusted Publishing (recomendado)
+
+O nuget.org desencoraja API keys de longa duração. O repositório inclui um workflow do
+GitHub Actions (`.github/workflows/publish.yml`) que usa **Trusted Publishing**: ele troca
+um token OIDC de curta duração do GitHub por uma chave temporária do nuget.org (válida por
+1 hora) no momento do push, de modo que nenhuma chave secreta fica armazenada.
+
+Configuração única:
+
+1. No nuget.org, abra **Account -> Trusted Publishing** e adicione uma política:
+   - **Repository Owner:** `giacomeli`
+   - **Repository:** `SimpleMapper`
+   - **Workflow File:** `publish.yml` (apenas o nome do arquivo, sem caminho)
+   - **Environment:** `release` (opcional; corresponde ao `environment:` do workflow)
+2. Adicione um secret de repositório `NUGET_USER` com o **nome de perfil** do nuget.org
+   (não o e-mail). É informação pública; o secret só mantém o workflow organizado.
+
+Para publicar, crie uma Release no GitHub com uma tag como `v1.0.0` (o workflow deriva a
+versão do pacote a partir da tag), ou dispare o workflow manualmente em **Actions -> Publish
+to NuGet -> Run workflow**. O workflow roda a suíte de testes antes de empacotar e publicar,
+e envia os símbolos `.snupkg` junto com o pacote.
+
+### Manual (local, fallback)
+
+Somente se você não puder usar CI. Requer uma API key criada manualmente:
+
 ```bash
 dotnet pack src/SimpleMapper.Net/SimpleMapper.Net.csproj -c Release
 dotnet nuget push src/SimpleMapper.Net/bin/Release/SimpleMapper.Net.1.0.0.nupkg \

@@ -1,0 +1,82 @@
+name: Publish to NuGet
+
+# Publishes SimpleMapper.Net to nuget.org using Trusted Publishing (OIDC).
+# No long-lived API key is stored: the job exchanges a short-lived GitHub OIDC
+# token for a temporary nuget.org API key (valid for 1 hour) right before pushing.
+#
+# One-time setup on nuget.org (Account -> Trusted Publishing):
+#   Repository Owner: giacomeli
+#   Repository:       SimpleMapper
+#   Workflow File:    publish.yml        (file name only, no path)
+#   Environment:      release            (optional; matches `environment:` below)
+#
+# The only repository secret required is NUGET_USER: your nuget.org profile name
+# (NOT your email). It is public information; the secret only keeps it tidy.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.0.0). Blank uses the csproj version."
+        required: false
+
+permissions:
+  contents: read
+  id-token: write # required for the Trusted Publishing OIDC token
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release # optional gate; also lockable in the nuget.org policy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: |
+          dotnet restore src/SimpleMapper.Net/SimpleMapper.Net.csproj
+          dotnet restore tests/SimpleMapper.Net.Tests/SimpleMapper.Net.Tests.csproj
+
+      - name: Test
+        run: dotnet test tests/SimpleMapper.Net.Tests/SimpleMapper.Net.Tests.csproj -c Release --no-restore
+
+      - name: Resolve package version
+        id: version
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ] && [ -n "${{ github.event.release.tag_name }}" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Pack
+        run: |
+          VERSION_ARG=""
+          if [ -n "${{ steps.version.outputs.value }}" ]; then
+            VERSION_ARG="-p:Version=${{ steps.version.outputs.value }}"
+          fi
+          dotnet pack src/SimpleMapper.Net/SimpleMapper.Net.csproj \
+            -c Release --no-restore -o out $VERSION_ARG
+
+      # Exchange the GitHub OIDC token for a short-lived nuget.org API key.
+      - name: NuGet login (Trusted Publishing)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      # Pushing the .nupkg also uploads the sibling .snupkg symbols automatically.
+      - name: Push package
+        run: >
+          dotnet nuget push "out/*.nupkg"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
