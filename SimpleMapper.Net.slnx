@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/SimpleMapper.Net.Benchmarks/SimpleMapper.Net.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/SimpleMapper.Net/SimpleMapper.Net.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SimpleMapper.Net.Tests/SimpleMapper.Net.Tests.csproj" />
+  </Folder>
+</Solution>

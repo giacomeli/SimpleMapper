@@ -1,0 +1,18 @@
+.vscode
+specs
+
+# macOS
+.DS_Store
+
+# Build artifacts
+bin/
+obj/
+artifacts/
+
+# Benchmark output
+BenchmarkDotNet.Artifacts/
+benchmarks/results/
+
+# User-specific files
+*.user
+*.suo

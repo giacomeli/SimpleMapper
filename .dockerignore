@@ -1,0 +1,13 @@
+.git
+.vscode
+.DS_Store
+**/bin
+**/obj
+docs
+specs
+tests
+BenchmarkDotNet.Artifacts
+benchmarks/results
+CLAUDE.md
+README.md
+LICENSE

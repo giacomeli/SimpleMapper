@@ -1,0 +1,24 @@
+# Runs the full benchmark suite inside a container with fixed, explicit resource
+# limits. Both mappers execute in the same process, so the limits apply equally to
+# SimpleMapper.Net and AutoMapper by construction; pinning them makes runs
+# reproducible across machines.
+#
+# Usage:
+#   docker compose -f docker-compose.benchmarks.yml up --build
+#   Reports (md/csv/json) are written to ./benchmarks/results/
+#
+# The canonical limits are 2 CPUs / 2 GB. Override them when your Docker VM
+# exposes fewer resources (the report records the actual environment):
+#   BENCH_CPUS=1 BENCH_MEM=2g docker compose -f docker-compose.benchmarks.yml up
+services:
+  benchmarks:
+    build:
+      context: .
+      dockerfile: benchmarks/SimpleMapper.Net.Benchmarks/Dockerfile
+    container_name: simplemapper-net-benchmarks
+    cpus: "${BENCH_CPUS:-2}"
+    mem_limit: "${BENCH_MEM:-2g}"
+    environment:
+      - DOTNET_CLI_TELEMETRY_OPTOUT=1
+    volumes:
+      - ./benchmarks/results:/results

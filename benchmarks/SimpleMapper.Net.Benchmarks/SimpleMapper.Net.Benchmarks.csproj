@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- SMEXP001: the benchmark exercises the experimental subtype mapping API on purpose.
+         NU1903: GHSA-rvv3-g6hj-g44x affects every MIT-licensed AutoMapper release (the fix
+         only shipped in the commercial v15+ line). AutoMapper is a benchmark-only dependency
+         here and is never shipped with the SimpleMapper.Net package. -->
+    <NoWarn>$(NoWarn);SMEXP001;NU1903</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- AutoMapper is pinned to 14.0.0: the last version published under the MIT
+         license before the project moved to commercial licensing (v15+), and the
+         first one not affected by GHSA-rvv3-g6hj-g44x. -->
+    <PackageReference Include="AutoMapper" Version="14.0.0" />
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SimpleMapper.Net\SimpleMapper.Net.csproj" />
+  </ItemGroup>
+
+</Project>
