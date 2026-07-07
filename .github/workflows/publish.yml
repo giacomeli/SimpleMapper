@@ -37,7 +37,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.0.x"
+          # Both runtimes so the multi-targeted test suite (net8.0;net10.0) runs on each.
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
       - name: Restore
         run: |

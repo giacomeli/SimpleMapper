@@ -30,7 +30,7 @@ If you want a mapper that does everything, this isn't it. If you want your DTO m
 dotnet add package SimpleMapper.Net
 ```
 
-Requires .NET 10.0 (multi-targeting for .NET 8+ is planned).
+Requires .NET 8.0 or later. The package multi-targets `net8.0` and `net10.0` (a .NET 9 project resolves the `net8.0` asset via NuGet).
 
 ## Example domain
 

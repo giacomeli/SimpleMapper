@@ -19,8 +19,8 @@ Guidance for AI coding agents working in this repository.
 | Path | Contents |
 | --- | --- |
 | `SimpleMapper.Net.slnx` | Solution (.NET 10 slnx format) |
-| `src/SimpleMapper.Net/` | The library (PackageId `SimpleMapper.Net`, net10.0, MIT) |
-| `tests/SimpleMapper.Net.Tests/` | xUnit; 51 tests; `InternalsVisibleTo` grants access to internal types |
+| `src/SimpleMapper.Net/` | The library (PackageId `SimpleMapper.Net`, multi-targets `net8.0;net10.0`, MIT) |
+| `tests/SimpleMapper.Net.Tests/` | xUnit; 56 tests; multi-targets `net8.0;net10.0`; `InternalsVisibleTo` grants access to internal types |
 | `benchmarks/SimpleMapper.Net.Benchmarks/` | BenchmarkDotNet vs AutoMapper 14.0.0 (last MIT version; benchmark-only dependency) |
 | `docs/` | `architecture.md`, `benchmarks.md` (EN) + `pt-br/` translations |
 
@@ -70,7 +70,6 @@ flowchart TD
 
 ## Known pending work
 
-- Multi-target port to net8.0+ (`net8.0;net10.0`) planned after v1.
 - Move the subtype registry from global static to instance/DI-scoped configuration (precondition for removing `[Experimental]`).
 
 ## Verification checklist

@@ -32,7 +32,7 @@ Se você quer um mapper que faz tudo, não é este. Se você quer que o mapeamen
 dotnet add package SimpleMapper.Net
 ```
 
-Requer .NET 10.0 (multi-targeting para .NET 8+ está planejado).
+Requer .NET 8.0 ou superior. O pacote é multi-target `net8.0` e `net10.0` (um projeto .NET 9 resolve o ativo `net8.0` via NuGet).
 
 ## Domínio de exemplo
 
