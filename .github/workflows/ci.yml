@@ -1,0 +1,37 @@
+name: CI
+
+# Runs on every push to main and on every pull request: the contributing rules
+# (warning-free Release build, green tests on both target frameworks) are
+# enforced here instead of only at release time.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # Both runtimes so the multi-targeted test suite (net8.0;net10.0) runs on each.
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore SimpleMapper.Net.slnx
+
+      - name: Build (warning-free)
+        run: dotnet build SimpleMapper.Net.slnx -c Release --no-restore -warnaserror
+
+      - name: Test
+        run: dotnet test SimpleMapper.Net.slnx -c Release --no-build

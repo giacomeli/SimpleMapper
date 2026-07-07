@@ -66,8 +66,11 @@ jobs:
           if [ -n "${{ steps.version.outputs.value }}" ]; then
             VERSION_ARG="-p:Version=${{ steps.version.outputs.value }}"
           fi
+          # ContinuousIntegrationBuild makes the build deterministic so the
+          # published .snupkg symbols map reliably back to the sources.
           dotnet pack src/SimpleMapper.Net/SimpleMapper.Net.csproj \
-            -c Release --no-restore -o out $VERSION_ARG
+            -c Release --no-restore -o out $VERSION_ARG \
+            -p:ContinuousIntegrationBuild=true
 
       # Exchange the GitHub OIDC token for a short-lived nuget.org API key.
       - name: NuGet login (Trusted Publishing)
