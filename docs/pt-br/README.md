@@ -18,13 +18,16 @@ Se você quer um mapper que faz tudo, não é este. Se você quer que o mapeamen
 
 ## Recursos
 
-- **Zero configuração** para o caso comum: propriedades com nomes iguais são copiadas automaticamente, incluindo objetos aninhados, coleções e dicionários.
+- **Zero configuração** para o caso comum: propriedades e campos públicos com nomes iguais são copiados automaticamente, incluindo objetos aninhados, coleções e dicionários.
 - **Totalmente dinâmico**: sem profiles, sem `CreateMap`, sem registro na inicialização. Os caches compilam de forma lazy no primeiro uso.
 - **Bidirecional por natureza**: `User -> UserDto` e `UserDto -> User` funcionam sem nenhum setup.
 - **Builder fluente** para ajustes por chamada: ignorar propriedades, renomear propriedades, navegar em paths profundos com type safety via lambdas e `Each()`.
+- **Mapear sobre instância existente**: `dto.MapTo(entity)` aplica um DTO sobre um objeto que você já tem (ex.: uma entidade rastreada do EF).
+- **Profundo por padrão**: o objeto mapeado nunca compartilha referências com o grafo de origem — objetos aninhados e itens de coleção são instâncias novas, mesmo quando os tipos de origem e destino são idênticos (dicionários são a exceção documentada).
+- **Falha alto**: membros não mapeáveis lançam `MappingException` com o nome da propriedade e os dois tipos — sem skips silenciosos, sem structs zeradas, sem erros crus de expression tree.
 - **Thread-safe**: todos os caches são lookups lock-free em `ConcurrentDictionary` após o primeiro uso.
 - **Rápido**: expression trees compiladas entregam performance de código escrito à mão no hot path — em paridade com o AutoMapper (ver [Benchmarks](benchmarks.md)).
-- **Debug logging**: imprime a árvore completa de mapeamento no console para diagnosticar um mapeamento.
+- **Debug logging**: imprime a árvore completa de mapeamento no console — ou em qualquer `TextWriter` — para diagnosticar um mapeamento.
 
 ## Instalação
 
@@ -72,6 +75,10 @@ var obj = user.MapTo(typeof(UserDto));
 
 // Mapeia cada item de uma coleção
 List<UserDto> dtos = users.MapListTo<UserDto>();
+
+// Mapeia sobre uma instância existente (membros sem correspondência mantêm seus valores)
+var entity = await db.Users.FindAsync(id);
+dto.MapTo(entity);
 ```
 
 ## Builder fluente
@@ -91,6 +98,17 @@ var dto = user.Map()
 var dto = user.Map()
     .WithDebugLogging()
     .To<UserDto>();
+
+// Ou enviar a árvore para qualquer TextWriter (texto puro) — usável em testes e logs de servidor
+var writer = new StringWriter();
+var dto = user.Map()
+    .WithDebugLogging(writer)
+    .To<UserDto>();
+
+// Aplicar o mapeamento configurado sobre uma instância existente
+user.Map()
+    .Ignore("InternalNotes")
+    .To(existingDto);
 ```
 
 ### Navegação profunda de propriedades
@@ -236,14 +254,30 @@ Uma revisão futura moverá o registro para uma configuração por instância/DI
 | Mappers gerados em compile time (zero reflection em runtime) | Considere source generators no estilo Mapperly |
 | Validação de configuração na inicialização (`AssertConfigurationIsValid`) | Não há configuração para validar — typos em strings de `Map`/`Ignore` aparecem em runtime |
 
+### O que mapeia, o que lança
+
+O SimpleMapper.Net prefere um erro alto e nomeado a dados silenciosamente errados. A matriz de suporte:
+
+| Par de membros | Comportamento |
+| --- | --- |
+| Mesmo tipo simples (primitivos, string, decimal, enums, Guid, DateTime/DateOnly/TimeOnly, TimeSpan, Uri, Version) | Cópia direta |
+| `T` <-> `T?` e alargamento numérico (`int -> long`, `float -> double`) | Convertido |
+| Tipos simples incompatíveis (`string -> double`, `int -> string`, `string -> enum`) | Lança `MappingException` com o nome do membro e os dois tipos |
+| Objeto aninhado, tipos diferentes ou idênticos | Mapeado profundo (instância nova; o DTO nunca compartilha referências com a origem) |
+| Coleção para `T[]`, `List<T>` ou qualquer interface que um `List<T>` satisfaça (`IEnumerable<T>`, `IList<T>`, `ICollection<T>`, `IReadOnlyList<T>`, ...) | Mapeada profundo, item a item |
+| Coleção para `HashSet<T>`, coleções imutáveis, coleções não genéricas (`ArrayList`) | Lança `MappingException` na construção do plano |
+| Dicionário | Copiado **por referência** (exceção documentada; não clonado) |
+| Membro tipado como `object`, delegate | Copiado por referência (a forma do destino é desconhecida / não instanciável) |
+| **Tipo target** struct (`MapTo<AlgumaStruct>()`) | Lança `NotSupportedException` |
+| **Propriedade** struct, tipos idênticos | Cópia por valor |
+| Propriedade struct, tipos diferentes | Lança `MappingException` |
+
 ### Limitações conhecidas
 
 - Grafos de objetos cíclicos não são seguidos — lançam `MappingDepthExceededException` (ver acima), não são resolvidos em grafos DTO cíclicos.
-- Dicionários são copiados **por referência**, não clonados.
 - Paths profundos de `Map`/`Ignore` exigem que source e target tenham a mesma profundidade.
-- Sem suporte a mapear sobre uma instância target existente (`Map(source, destination)`).
-- Structs como source/target não são cenário de primeira classe (o foco é classe-para-classe).
 - O path de debug (`WithDebugLogging`) é lento e aloca por design; nunca o deixe ligado em código de produção.
+- **NativeAOT / trimming**: o código de mapeamento é construído em runtime com reflection e expression trees compiladas. A API pública é anotada com `[RequiresDynamicCode]` e `[RequiresUnreferencedCode]`, então projetos AOT/trimmed recebem um warning em tempo de compilação: o SimpleMapper.Net não é a ferramenta certa nesses cenários — considere um mapper com source generator (ex.: Mapperly).
 
 ## Performance
 

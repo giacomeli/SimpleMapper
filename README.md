@@ -16,13 +16,16 @@ If you want a mapper that does everything, this isn't it. If you want your DTO m
 
 ## Features
 
-- **Zero configuration** for the common case: properties with matching names are copied automatically, including nested objects, collections and dictionaries.
+- **Zero configuration** for the common case: properties and public fields with matching names are copied automatically, including nested objects, collections and dictionaries.
 - **Fully dynamic**: no profiles, no `CreateMap`, no startup registration. Caches compile lazily on first use.
 - **Bidirectional by nature**: `User -> UserDto` and `UserDto -> User` both work without any setup.
 - **Fluent builder** for per-call overrides: ignore properties, rename properties, navigate deep paths type-safely with lambdas and `Each()`.
+- **Map onto an existing instance**: `dto.MapTo(entity)` applies a DTO onto an object you already have (e.g. a tracked EF entity).
+- **Deep by default**: the mapped object never aliases the source graph — nested objects and collection items are new instances, even when source and target types are identical (dictionaries are the documented exception).
+- **Fail loud**: unmappable members throw `MappingException` naming the property and both types — no silent skips, no zeroed structs, no raw expression-tree errors.
 - **Thread-safe**: all caches are lock-free `ConcurrentDictionary` lookups after first use.
 - **Fast**: compiled expression trees give hand-written-code performance on the hot path — on par with AutoMapper (see [Benchmarks](docs/benchmarks.md)).
-- **Debug logging**: print the whole mapping tree to the console to diagnose a mapping.
+- **Debug logging**: print the whole mapping tree to the console — or any `TextWriter` — to diagnose a mapping.
 
 ## Installation
 
@@ -69,6 +72,10 @@ var obj = user.MapTo(typeof(UserDto));
 
 // Map every item of a collection
 List<UserDto> dtos = users.MapListTo<UserDto>();
+
+// Map onto an existing instance (unmatched target members keep their values)
+var entity = await db.Users.FindAsync(id);
+dto.MapTo(entity);
 ```
 
 ## Fluent builder
@@ -88,6 +95,17 @@ var dto = user.Map()
 var dto = user.Map()
     .WithDebugLogging()
     .To<UserDto>();
+
+// Or send the tree to any TextWriter (plain text) — usable in tests and server logs
+var writer = new StringWriter();
+var dto = user.Map()
+    .WithDebugLogging(writer)
+    .To<UserDto>();
+
+// Apply the configured mapping onto an existing instance
+user.Map()
+    .Ignore("InternalNotes")
+    .To(existingDto);
 ```
 
 ### Deep property navigation
@@ -233,14 +251,30 @@ A future revision will move the registry into an instance/DI-scoped configuratio
 | Compile-time generated mappers (zero reflection at runtime) | Consider Mapperly-style source generators |
 | Configuration validation at startup (`AssertConfigurationIsValid`) | There is no configuration to validate — typos in `Map`/`Ignore` strings surface at runtime |
 
+### What maps, what throws
+
+SimpleMapper.Net prefers a loud, named error over silently wrong data. The support matrix:
+
+| Member pair | Behavior |
+| --- | --- |
+| Same simple type (primitives, string, decimal, enums, Guid, DateTime/DateOnly/TimeOnly, TimeSpan, Uri, Version) | Direct copy |
+| `T` <-> `T?` and numeric widening (`int -> long`, `float -> double`) | Converted |
+| Incompatible simple types (`string -> double`, `int -> string`, `string -> enum`) | Throws `MappingException` naming the member and both types |
+| Nested object, different or identical types | Deep-mapped (a new instance; the DTO never aliases the source) |
+| Collection to `T[]`, `List<T>` or any interface a `List<T>` satisfies (`IEnumerable<T>`, `IList<T>`, `ICollection<T>`, `IReadOnlyList<T>`, ...) | Deep-mapped item by item |
+| Collection to `HashSet<T>`, immutable collections, non-generic collections (`ArrayList`) | Throws `MappingException` at plan build |
+| Dictionary | Copied **by reference** (documented exception; not cloned) |
+| `object`-typed member, delegate | Copied by reference (the target shape is unknowable / not instantiable) |
+| Struct **target type** (`MapTo<SomeStruct>()`) | Throws `NotSupportedException` |
+| Struct **property**, identical types | Value copy |
+| Struct property, different types | Throws `MappingException` |
+
 ### Known limitations
 
 - Cyclic object graphs are not followed — they throw `MappingDepthExceededException` (see above), they are not resolved into cyclic DTO graphs.
-- Dictionaries are copied **by reference**, not cloned.
 - Deep `Map`/`Ignore` paths require the source and target paths to have the same depth.
-- No support for mapping onto an existing target instance (`Map(source, destination)`).
-- Struct sources/targets are not a first-class scenario (class-to-class mapping is).
 - The debug path (`WithDebugLogging`) is intentionally slow and allocates; never leave it on in production code.
+- **NativeAOT / trimming**: mapping code is built at runtime with reflection and compiled expression trees. The public API is annotated with `[RequiresDynamicCode]` and `[RequiresUnreferencedCode]`, so AOT/trimmed projects get a compile-time warning: SimpleMapper.Net is not the right tool there — consider a source-generated mapper (e.g. Mapperly).
 
 ## Performance
 
@@ -268,6 +302,7 @@ docker compose -f docker-compose.benchmarks.yml up --build
 
 - [Architecture and internals](docs/architecture.md)
 - [Benchmarks: methodology and results](docs/benchmarks.md)
+- [Changelog](CHANGELOG.md)
 - Portuguese (pt-BR) translations: [docs/pt-br/](docs/pt-br/)
 
 ## Contributing
