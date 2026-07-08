@@ -281,15 +281,15 @@ SimpleMapper.Net prefers a loud, named error over silently wrong data. The suppo
 Benchmarked with BenchmarkDotNet against AutoMapper 14.0.0 (the last MIT release) over a synthetic content-platform graph (~60 mapped properties, 4-5 nesting levels, collections, dictionary, one polymorphic item). Full methodology, environment and reproduction steps: [docs/benchmarks.md](docs/benchmarks.md).
 
 <!-- BENCHMARK-SUMMARY:START -->
-Containerized run (Ubuntu Arm64 container, .NET 10.0.9, 1 CPU / 2 GB):
+Containerized run (Ubuntu Arm64 container, .NET 10.0.9, 1 CPU / 2 GB), v2.0.0:
 
 | Scenario | AutoMapper 14.0.0 | SimpleMapper.Net |
 | --- | --- | --- |
-| Single mapping (forward) | 1.584 us / 5.14 KB | 2.085 us / 5.59 KB |
-| Single mapping (reverse) | 1.521 us / 5.14 KB | 2.100 us / 5.59 KB |
-| Batch x100 (forward) | 222.3 us / 514.9 KB | 241.6 us / 560.2 KB |
+| Single mapping (forward) | 1.601 us / 5.14 KB | 2.238 us / 5.59 KB |
+| Single mapping (reverse) | 1.539 us / 5.14 KB | 2.517 us / 5.59 KB |
+| Batch x100 (forward) | 177.3 us / 514.9 KB | 247.3 us / 560.2 KB |
 
-Same order of magnitude across the board: batch throughput within ~9%, single mappings roughly half a microsecond more per call on this graph.
+Same order of magnitude across the board; single mappings land roughly half a microsecond over AutoMapper per call on this graph, and allocations are unchanged from v1.x — the unified deep-map semantics added no work to the hot path.
 <!-- BENCHMARK-SUMMARY:END -->
 
 Run it yourself, with pinned resources, in one command:

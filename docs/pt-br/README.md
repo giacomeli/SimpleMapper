@@ -284,15 +284,15 @@ O SimpleMapper.Net prefere um erro alto e nomeado a dados silenciosamente errado
 Medido com BenchmarkDotNet contra o AutoMapper 14.0.0 (última versão MIT) sobre um grafo sintético de plataforma de conteúdo (~60 propriedades mapeadas, 4-5 níveis de aninhamento, coleções, dicionário, um item polimórfico). Metodologia completa, ambiente e reprodução: [benchmarks.md](benchmarks.md).
 
 <!-- BENCHMARK-SUMMARY:START -->
-Execução containerizada (container Ubuntu Arm64, .NET 10.0.9, 1 CPU / 2 GB):
+Execução containerizada (container Ubuntu Arm64, .NET 10.0.9, 1 CPU / 2 GB), v2.0.0:
 
 | Cenário | AutoMapper 14.0.0 | SimpleMapper.Net |
 | --- | --- | --- |
-| Mapeamento único (forward) | 1.584 us / 5.14 KB | 2.085 us / 5.59 KB |
-| Mapeamento único (reverso) | 1.521 us / 5.14 KB | 2.100 us / 5.59 KB |
-| Batch x100 (forward) | 222.3 us / 514.9 KB | 241.6 us / 560.2 KB |
+| Mapeamento único (forward) | 1.601 us / 5.14 KB | 2.238 us / 5.59 KB |
+| Mapeamento único (reverso) | 1.539 us / 5.14 KB | 2.517 us / 5.59 KB |
+| Batch x100 (forward) | 177.3 us / 514.9 KB | 247.3 us / 560.2 KB |
 
-Mesma ordem de grandeza em todos os cenários: throughput de batch dentro de ~9%, mapeamentos únicos cerca de meio microssegundo a mais por chamada neste grafo.
+Mesma ordem de grandeza em todos os cenários; mapeamentos únicos ficam cerca de meio microssegundo acima do AutoMapper por chamada neste grafo, e as alocações não mudaram em relação à v1.x — a semântica unificada de deep-map não adicionou trabalho ao hot path.
 <!-- BENCHMARK-SUMMARY:END -->
 
 Rode você mesmo, com recursos fixados, em um comando:

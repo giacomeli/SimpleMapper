@@ -4,7 +4,12 @@ All notable changes to SimpleMapper.Net are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.0.0] - 2026-07-07
+
+Major version: mapping semantics changed (deep-by-default, no aliasing) and
+several previously silent failure modes now throw. Code that relied on
+reference-copied nested objects, struct targets or silently skipped members
+must be reviewed before upgrading.
 
 ### Changed (behavior)
 
