@@ -1,7 +1,7 @@
 # Runs the full benchmark suite inside a container with fixed, explicit resource
-# limits. Both mappers execute in the same process, so the limits apply equally to
-# SimpleMapper.Net and AutoMapper by construction; pinning them makes runs
-# reproducible across machines.
+# limits. Every mapper (manual baseline, Mapperly, SimpleMapper.Net, AutoMapper,
+# Mapster) executes in the same process, so the limits apply equally to all of
+# them by construction; pinning them makes runs reproducible across machines.
 #
 # Usage:
 #   docker compose -f docker-compose.benchmarks.yml up --build

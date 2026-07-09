@@ -1,4 +1,3 @@
 using BenchmarkDotNet.Running;
-using SimpleMapper.Net.Benchmarks;
 
-BenchmarkSwitcher.FromTypes(new[] { typeof(MappingBenchmarks) }).Run(args);
+BenchmarkSwitcher.FromAssembly(typeof(SimpleMapper.Net.Benchmarks.MappingBenchmarks).Assembly).Run(args);

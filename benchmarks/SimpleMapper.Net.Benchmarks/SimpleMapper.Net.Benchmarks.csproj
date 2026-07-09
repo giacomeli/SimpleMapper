@@ -19,6 +19,8 @@
          first one not affected by GHSA-rvv3-g6hj-g44x. -->
     <PackageReference Include="AutoMapper" Version="14.0.0" />
     <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageReference Include="Mapster" Version="10.0.10" />
+    <PackageReference Include="Riok.Mapperly" Version="4.3.1" />
   </ItemGroup>
 
   <ItemGroup>
