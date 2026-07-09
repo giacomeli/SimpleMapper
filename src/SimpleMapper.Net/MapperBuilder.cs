@@ -19,6 +19,7 @@ public sealed class MapperBuilder<TSource>
     private readonly List<(string[] Source, string[] Target)> _mappingPaths = new();
     private bool _debug;
     private TextWriter? _debugWriter;
+    private bool _allowUninitialized;
 
     internal MapperBuilder(TSource source) => _source = source;
 
@@ -82,6 +83,19 @@ public sealed class MapperBuilder<TSource>
         else
             _ignoredPaths.Add(segments);
 
+        return this;
+    }
+
+    /// <summary>
+    /// Allows targets without a parameterless constructor to be created uninitialized
+    /// for this mapping only — including nested objects and collection items — regardless
+    /// of <see cref="SimpleMapperOptions.ObjectConstruction"/>. Constructor logic and
+    /// field initializers are skipped for those targets; opt in only for types that
+    /// tolerate it (e.g. positional records used as DTOs).
+    /// </summary>
+    public MapperBuilder<TSource> AllowUninitializedObjects()
+    {
+        _allowUninitialized = true;
         return this;
     }
 
@@ -168,7 +182,11 @@ public sealed class MapperBuilder<TSource>
             node.Mappings[tgtPath[^1]] = srcPath[^1];
         }
 
-        return root.ToConfig(_debug) with { DebugWriter = _debugWriter };
+        return root.ToConfig(_debug) with
+        {
+            DebugWriter = _debugWriter,
+            AllowUninitializedObjects = _allowUninitialized,
+        };
     }
 
     private sealed class ConfigNode

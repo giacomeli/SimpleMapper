@@ -28,4 +28,14 @@ public static class SimpleMapperOptions
             _maxDepth = value;
         }
     }
+
+    /// <summary>
+    /// How mapping targets without a parameterless constructor are created.
+    /// Default: <see cref="ObjectConstructionMode.RequireParameterlessConstructor"/> —
+    /// mapping to such a type throws <see cref="MappingException"/> naming the type
+    /// and the two ways out. The mode is checked every time an instance is created,
+    /// so changing it also affects mappings whose plans are already compiled.
+    /// </summary>
+    public static ObjectConstructionMode ObjectConstruction { get; set; }
+        = ObjectConstructionMode.RequireParameterlessConstructor;
 }

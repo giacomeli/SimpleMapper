@@ -4,11 +4,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Diagnostics.CodeAnalysis;
 
 namespace SimpleMapper.Net;
 
 internal static class TypedPlanBuilder
 {
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     public static Action<object, object> Build(Type srcType, Type tgtType)
     {
         var srcParam = Expression.Parameter(typeof(object), "srcObj");
@@ -64,6 +67,8 @@ internal static class TypedPlanBuilder
     }
 
     // Public instance properties (readable, non-indexed) and public instance fields.
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static Dictionary<string, (MemberInfo Member, Type Type)> GetReadableMembers(Type t)
     {
         var d = new Dictionary<string, (MemberInfo, Type)>();
@@ -75,6 +80,8 @@ internal static class TypedPlanBuilder
         return d;
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static List<(MemberInfo Member, Type Type)> GetWritableMembers(Type t)
     {
         var list = new List<(MemberInfo, Type)>();
@@ -87,6 +94,8 @@ internal static class TypedPlanBuilder
         return list;
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static Expression? BuildMemberAssignment(
         Expression srcTyped, Expression tgtTyped,
         MemberInfo srcMember, Type srcMemberType,
@@ -199,6 +208,8 @@ internal static class TypedPlanBuilder
                 : Expression.Convert(srcAccess, tgtMemberType));
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static Expression BuildCollectionAssignment(
         Expression srcAccess, MemberExpression tgtAccess,
         MemberInfo srcMember, Type srcMemberType,
@@ -256,6 +267,8 @@ internal static class TypedPlanBuilder
         return Expression.Assign(tgtAccess, callExpr);
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static Expression BuildComplexAssignment(
         Expression srcAccess, MemberExpression tgtAccess,
         Type srcMemberType, Type tgtMemberType)
@@ -285,6 +298,8 @@ internal static class TypedPlanBuilder
 
     // ---- Runtime helpers (called from expression tree) ----
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static object MapComplexObject(object src, Type tgtType)
     {
         if (src == null) return null!;
@@ -311,6 +326,8 @@ internal static class TypedPlanBuilder
         finally { MapperEngine.ExitMapping(); }
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static object MapCollectionTyped<TSrc, TTgt>(object srcCol, bool targetIsArray, bool itemIsSimple)
     {
         if (srcCol is not IEnumerable<TSrc> enumerable)
@@ -332,6 +349,8 @@ internal static class TypedPlanBuilder
 
     // ---- Helpers ----
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static Type? GetCollectionItemType(Type collectionType)
     {
         if (collectionType.IsArray)

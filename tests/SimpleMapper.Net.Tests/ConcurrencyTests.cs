@@ -3,8 +3,27 @@ using SimpleMapper.Net;
 
 namespace SimpleMapper.Net.Tests;
 
-public class ConcurrencyTests
+/// <summary>
+/// Race-condition coverage for the caches and per-call configs. The record targets
+/// have no parameterless constructor, so the whole class runs under the global
+/// uninitialized opt-in (set per test instance, restored on dispose) — inside a
+/// serialized collection so the process-wide option never races with the tests
+/// that assert the strict default.
+/// </summary>
+[Collection("ObjectConstruction")]
+public class ConcurrencyTests : IDisposable
 {
+    private readonly ObjectConstructionMode _originalMode;
+
+    public ConcurrencyTests()
+    {
+        _originalMode = SimpleMapperOptions.ObjectConstruction;
+        SimpleMapperOptions.ObjectConstruction = ObjectConstructionMode.AllowUninitializedObjects;
+    }
+
+    public void Dispose()
+        => SimpleMapperOptions.ObjectConstruction = _originalMode;
+
     private record Source(
         string Name, int Age, long Score,
         Guid? ExternalId, int? OptionalRank, string InternalTag);

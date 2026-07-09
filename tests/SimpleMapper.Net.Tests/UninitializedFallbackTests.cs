@@ -3,11 +3,13 @@ using SimpleMapper.Net;
 namespace SimpleMapper.Net.Tests;
 
 /// <summary>
-/// Documents the instantiation contract: targets with an accessible parameterless
-/// constructor (public or protected) are created through it; targets without one
-/// fall back to an uninitialized instance (no constructor runs) and have their
-/// properties populated directly by the mapper.
+/// Documents the instantiation contract: targets with a parameterless constructor
+/// (any visibility) are created through it; targets without one require an explicit
+/// opt-in (global option or per-call builder) to be created uninitialized — no
+/// constructor runs and the mapper populates the members directly. The strict
+/// default is covered by <see cref="ObjectConstructionModeTests"/>.
 /// </summary>
+[Collection("ObjectConstruction")]
 public sealed class UninitializedFallbackTests
 {
     private class PlainSource
@@ -43,11 +45,13 @@ public sealed class UninitializedFallbackTests
     }
 
     [Fact]
-    public void TargetWithoutParameterlessCtor_IsMapped_ViaUninitializedFallback()
+    public void TargetWithoutParameterlessCtor_IsMapped_ViaUninitializedOptIn()
     {
         var src = new PlainSource { Name = "mapped", Value = 7 };
 
-        var result = src.MapTo<TargetWithoutParameterlessCtor>();
+        var result = src.Map()
+            .AllowUninitializedObjects()
+            .To<TargetWithoutParameterlessCtor>();
 
         Assert.Equal("mapped", result.Name);
         Assert.Equal(7, result.Value);
@@ -66,11 +70,13 @@ public sealed class UninitializedFallbackTests
     }
 
     [Fact]
-    public void PositionalRecord_IsMapped_WithoutParameterlessCtor()
+    public void PositionalRecord_IsMapped_UnderOptIn()
     {
         var src = new PlainSource { Name = "rec", Value = 3 };
 
-        var result = src.MapTo<RecordTarget>();
+        var result = src.Map()
+            .AllowUninitializedObjects()
+            .To<RecordTarget>();
 
         Assert.Equal("rec", result.Name);
         Assert.Equal(3, result.Value);

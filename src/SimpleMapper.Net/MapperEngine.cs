@@ -6,6 +6,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 
 namespace SimpleMapper.Net;
 
@@ -42,6 +43,8 @@ internal static class MapperEngine
 
     private static readonly ConcurrentDictionary<(Type src, Type tgt), TypePlan> PlanCache = new();
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     internal static TypePlan GetOrBuildPlan(Type srcType, Type tgtType)
     {
         return PlanCache.GetOrAdd((srcType, tgtType), key => BuildPlan(key.src, key.tgt));
@@ -69,6 +72,32 @@ internal static class MapperEngine
 
     internal static void ExitMapping() => _depth--;
 
+    // ---- Per-call opt-in for constructor-less creation ----
+
+    // Set for the duration of a single Execute/ExecuteInto call — covering every
+    // nested object and collection item it creates — when the fluent builder's
+    // AllowUninitializedObjects() opt-in is used. Read by TypedMapperCache.BuildFactory,
+    // whose factories are cached per type pair and therefore cannot capture per-call
+    // configuration at build time.
+    [ThreadStatic] private static bool _allowUninitialized;
+
+    internal static bool AllowUninitializedObjectsAmbient => _allowUninitialized;
+
+    // ---- Cache reset (tests and cold-start benchmarks) ----
+
+    /// <summary>
+    /// Drops every derived cache (compiled pairs, plans, getters/setters) so the
+    /// first-mapping cost can be measured again. Subtype rules are user registrations,
+    /// not derived state, and survive. Internal: exposed to tests and benchmarks only.
+    /// </summary>
+    internal static void ClearCaches()
+    {
+        PlanCache.Clear();
+        GettersCache.Clear();
+        SettersCache.Clear();
+        TypedMapperCache.Clear();
+    }
+
     // ---- Public API ----
 
     public static void RegisterSubtype<TSource>(Func<object, bool> discriminator, Type targetType)
@@ -86,35 +115,45 @@ internal static class MapperEngine
         }
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     public static TTarget Execute<TTarget>(object source, MappingConfig cfg)
         => (TTarget)Execute(source, typeof(TTarget), cfg);
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     public static object Execute(object source, Type targetType, MappingConfig cfg)
     {
-        var resolvedType = ResolveSubtype(source, targetType);
-        ThrowIfValueTypeTarget(resolvedType);
-        var useFast = !cfg.DebugLogging && cfg.PropertyMappings.Count == 0
-            && cfg.ChildConfigs.Count == 0;
-
-        if (useFast)
+        var priorAllow = _allowUninitialized;
+        if (cfg.AllowUninitializedObjects) _allowUninitialized = true;
+        try
         {
-            var pair = TypedMapperCache.GetOrBuild(source.GetType(), resolvedType);
-            var target = pair.CreateTarget();
-            MapPropertiesFast(source, target, cfg);
-            return target;
+            var resolvedType = ResolveSubtype(source, targetType);
+            ThrowIfValueTypeTarget(resolvedType);
+            var useFast = !cfg.DebugLogging && cfg.PropertyMappings.Count == 0
+                && cfg.ChildConfigs.Count == 0;
+
+            if (useFast)
+            {
+                var pair = TypedMapperCache.GetOrBuild(source.GetType(), resolvedType);
+                var target = pair.CreateTarget();
+                MapPropertiesFast(source, target, cfg);
+                return target;
+            }
+
+            var plan = PlanCache.GetOrAdd((source.GetType(), resolvedType),
+                key => BuildPlan(key.src, key.tgt));
+            var tgt = plan.CreateTarget();
+
+            if (cfg.DebugLogging)
+                MapPropertiesDebug(source, tgt, cfg, 0,
+                    new HashSet<object>(ReferenceEqualityComparer.Instance), cfg.DebugWriter ?? Console.Out);
+            else
+                MapPropertiesDynamic(source, tgt, cfg, plan);
+
+            return tgt;
         }
-
-        var plan = PlanCache.GetOrAdd((source.GetType(), resolvedType),
-            key => BuildPlan(key.src, key.tgt));
-        var tgt = plan.CreateTarget();
-
-        if (cfg.DebugLogging)
-            MapPropertiesDebug(source, tgt, cfg, 0,
-                new HashSet<object>(ReferenceEqualityComparer.Instance), cfg.DebugWriter ?? Console.Out);
-        else
-            MapPropertiesDynamic(source, tgt, cfg, plan);
-
-        return tgt;
+        finally { _allowUninitialized = priorAllow; }
     }
 
     /// <summary>
@@ -122,22 +161,30 @@ internal static class MapperEngine
     /// MapTo(destination) and MapperBuilder.To(destination); subtype rules do not
     /// apply because the target already exists.
     /// </summary>
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     public static void ExecuteInto(object source, object target, MappingConfig cfg)
     {
-        var useFast = !cfg.DebugLogging && cfg.PropertyMappings.Count == 0
-            && cfg.ChildConfigs.Count == 0;
-
-        if (useFast)
+        var priorAllow = _allowUninitialized;
+        if (cfg.AllowUninitializedObjects) _allowUninitialized = true;
+        try
         {
-            MapPropertiesFast(source, target, cfg);
-            return;
-        }
+            var useFast = !cfg.DebugLogging && cfg.PropertyMappings.Count == 0
+                && cfg.ChildConfigs.Count == 0;
 
-        if (cfg.DebugLogging)
-            MapPropertiesDebug(source, target, cfg, 0,
-                new HashSet<object>(ReferenceEqualityComparer.Instance), cfg.DebugWriter ?? Console.Out);
-        else
-            MapPropertiesDynamic(source, target, cfg);
+            if (useFast)
+            {
+                MapPropertiesFast(source, target, cfg);
+                return;
+            }
+
+            if (cfg.DebugLogging)
+                MapPropertiesDebug(source, target, cfg, 0,
+                    new HashSet<object>(ReferenceEqualityComparer.Instance), cfg.DebugWriter ?? Console.Out);
+            else
+                MapPropertiesDynamic(source, target, cfg);
+        }
+        finally { _allowUninitialized = priorAllow; }
     }
 
     private static void ThrowIfValueTypeTarget(Type targetType)
@@ -152,6 +199,8 @@ internal static class MapperEngine
 
     // ---- Fast path (no debug, no allocations) ----
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static void MapPropertiesFast(object src, object tgt, MappingConfig cfg, TypePlan? plan = null)
     {
         EnterMapping();
@@ -217,6 +266,8 @@ internal static class MapperEngine
         finally { ExitMapping(); }
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static object MapCollectionFast(IEnumerable srcCol, Type itemType,
         Func<IList> createList, bool itemIsSimple, bool targetIsArray, MappingConfig cfg)
     {
@@ -260,6 +311,8 @@ internal static class MapperEngine
 
     // ---- Dynamic path (PropertyMappings support, no debug) ----
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static void MapPropertiesDynamic(object src, object tgt, MappingConfig cfg, TypePlan? plan = null)
     {
         EnterMapping();
@@ -324,6 +377,8 @@ internal static class MapperEngine
 
     // ---- Debug path (preserves TreeConsole output) ----
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static void MapPropertiesDebug(object src, object tgt, MappingConfig cfg,
         int depth, HashSet<object>? visited, System.IO.TextWriter w)
     {
@@ -388,6 +443,8 @@ internal static class MapperEngine
         finally { ExitMapping(); }
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static object? MapComplexDebug(object srcObj, Type tgtType, MappingConfig cfg,
         int depth, HashSet<object>? visited, System.IO.TextWriter w)
     {
@@ -406,6 +463,8 @@ internal static class MapperEngine
         return tgtObj;
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static object? MapCollectionDebug(IEnumerable srcCol, Type tgtColType,
         MappingConfig cfg, int depth, HashSet<object>? visited, System.IO.TextWriter w)
     {
@@ -472,6 +531,8 @@ internal static class MapperEngine
 
     // ---- Plan building ----
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static TypePlan BuildPlan(Type srcType, Type tgtType)
     {
         var getters = GettersCache.GetOrAdd(srcType, BuildGetters);
@@ -567,6 +628,8 @@ internal static class MapperEngine
         return new TypePlan(factory, props.ToArray());
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static Dictionary<string, Type> BuildReadableMemberTypes(Type t)
     {
         var d = new Dictionary<string, Type>();
@@ -589,6 +652,8 @@ internal static class MapperEngine
 
     // ---- Dump helpers (debug only) ----
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static void DumpObject(object obj, int depth, HashSet<object>? visited, System.IO.TextWriter w)
     {
         if (visited == null || !visited.Add(obj)) return;
@@ -617,6 +682,8 @@ internal static class MapperEngine
         }
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static void DumpCollection(IEnumerable en, int depth, HashSet<object> visited, System.IO.TextWriter w)
     {
         var list = en.Cast<object?>().ToList();
@@ -634,6 +701,8 @@ internal static class MapperEngine
 
     // ---- Getter/setter building ----
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static Dictionary<string, Func<object, object?>> BuildGetters(Type t)
     {
         var d = new Dictionary<string, Func<object, object?>>();
@@ -644,6 +713,8 @@ internal static class MapperEngine
         return d;
     }
 
+    [RequiresDynamicCode(SimpleMapperExtensions.AotWarning)]
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static Dictionary<string, SetterInfo> BuildSetters(Type t)
     {
         // NullabilityInfoContext is not thread-safe; keep it local to this method.

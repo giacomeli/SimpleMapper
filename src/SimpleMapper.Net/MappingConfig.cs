@@ -33,6 +33,15 @@ public sealed record MappingConfig
     /// </summary>
     public System.IO.TextWriter? DebugWriter { get; init; }
 
+    /// <summary>
+    /// Allows targets without a parameterless constructor to be created uninitialized
+    /// for this call only, overriding <see cref="SimpleMapperOptions.ObjectConstruction"/>.
+    /// Applies to the root target and to every nested object and collection item the
+    /// call creates. Does not affect which properties map, so it is deliberately
+    /// excluded from <see cref="IsEmpty"/> and the fast path stays available.
+    /// </summary>
+    public bool AllowUninitializedObjects { get; init; }
+
     /// <summary>True when the config carries no overrides and the fast path can be used.</summary>
     public bool IsEmpty => IgnoredProperties.Count == 0
         && PropertyMappings.Count == 0

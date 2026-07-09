@@ -6,11 +6,17 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- The library is intentionally not NativeAOT/trim compatible (runtime reflection
+         and compiled expression trees). The analyzers keep the RequiresDynamicCode /
+         RequiresUnreferencedCode annotations on the public API compiler-verified
+         instead of hand-maintained. -->
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
   </PropertyGroup>
 
   <PropertyGroup Label="Package">
     <PackageId>SimpleMapper.Net</PackageId>
-    <Version>2.0.0</Version>
+    <Version>2.1.0</Version>
     <Authors>Juliano Giacomeli</Authors>
     <Description>A simple, zero-configuration object-to-object mapper for .NET. Convention-based mapping powered by compiled expression trees, with a fluent builder for per-call overrides (ignore, rename, deep property paths) and a single lightweight dependency. An MIT-licensed alternative to AutoMapper.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -29,6 +35,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SimpleMapper.Net.Tests" />
+    <!-- Benchmarks reset the internal caches to measure cold-start (first-mapping) cost. -->
+    <InternalsVisibleTo Include="SimpleMapper.Net.Benchmarks" />
   </ItemGroup>
 
   <!-- Align the DI abstractions dependency with each target so a net8.0 consumer
