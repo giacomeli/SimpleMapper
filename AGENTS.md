@@ -21,7 +21,7 @@ Guidance for AI coding agents working in this repository.
 | `SimpleMapper.Net.slnx` | Solution (.NET 10 slnx format) |
 | `src/SimpleMapper.Net/` | The library (PackageId `SimpleMapper.Net`, multi-targets `net8.0;net10.0`, MIT) |
 | `tests/SimpleMapper.Net.Tests/` | xUnit; 56 tests; multi-targets `net8.0;net10.0`; `InternalsVisibleTo` grants access to internal types |
-| `benchmarks/SimpleMapper.Net.Benchmarks/` | BenchmarkDotNet vs AutoMapper 14.0.0 (last MIT version; benchmark-only dependency) |
+| `benchmarks/SimpleMapper.Net.Benchmarks/` | BenchmarkDotNet vs manual baseline, Mapperly, AutoMapper 14.0.0 (last MIT version) and Mapster — all benchmark-only dependencies |
 | `docs/` | `architecture.md`, `benchmarks.md` (EN) + `pt-br/` translations |
 
 ```bash
@@ -62,7 +62,9 @@ flowchart TD
 - **`NullabilityInfoContext` is not thread-safe** — it stays a local variable in `BuildSetters`, never a static field.
 - **Skip-if-null semantics**: a non-nullable target property with a null source value is skipped (keeps its default).
 - **Recursion depth guard (CWE-674)**: nested mapping is bounded by `SimpleMapperOptions.MaxDepth` (default 100) via a `[ThreadStatic]` counter (`MapperEngine.EnterMapping`/`ExitMapping`, always in `try`/`finally`). A cyclic or too-deep graph throws the catchable `MappingDepthExceededException` instead of a StackOverflowException. Any new recursion carrier must be wrapped by the guard; covered by `RecursionGuardTests`.
-- **Instantiation**: an accessible parameterless constructor (public or protected) is used when present; without one, `RuntimeHelpers.GetUninitializedObject` creates the instance **without running any constructor** (covered by `UninitializedFallbackTests`). There is no `AllowUninitialized()` — that no-op API was removed in v1.
+- **Instantiation**: a parameterless constructor (any visibility) is used when present; without one, mapping **throws `MappingException` by default** (`ObjectConstructionMode.RequireParameterlessConstructor`, since 2.1.0). The `GetUninitializedObject` fallback (no constructor runs, field initializers skipped) requires an explicit opt-in: global via `SimpleMapperOptions.ObjectConstruction`, or per call via `MapperBuilder.AllowUninitializedObjects()` — the per-call form travels as a `[ThreadStatic]` ambient flag read by `TypedMapperCache.BuildFactory` at invocation time (factories are cached per type pair, so the check cannot live at factory-build time). Covered by `ObjectConstructionModeTests` and `UninitializedFallbackTests`. Do not confuse the new `AllowUninitializedObjects()` with the old `AllowUninitialized()` no-op removed in v1.
+- **Non-public setters are written on purpose** (`private set`, `protected set`, `init`) — same mechanism that fills init-only record members; pinned by `NonPublicSetterTests`. Do not "fix" this to public-only.
+- **`MapperEngine.ClearCaches()` (internal)** drops every derived cache (typed pairs, plans, getters/setters) but preserves subtype rules; used by the cold-start benchmarks and available to tests via `InternalsVisibleTo`.
 - **`[Experimental]`**: consumers of the subtype APIs must suppress `SMEXP001` (tests and benchmarks already do via `NoWarn` in their csproj).
 - **AutoMapper in the benchmark is pinned to 14.0.0** (last MIT version; advisory GHSA-rvv3-g6hj-g44x has no fix in the MIT line — `NoWarn NU1903` is justified in the csproj). Do not bump to 15+ (commercial license).
 - **Zero warnings is a build requirement** — the library generates XML docs (`GenerateDocumentationFile`), so every new public member needs an XML doc comment.

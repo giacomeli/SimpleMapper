@@ -114,10 +114,19 @@ The `HasSubtypeRules` cache is what makes the zero-subtype majority free — and
 flowchart TD
     A["TypedMapperCache.BuildFactory(type)"] --> B{"Parameterless constructor exists?<br/>(public or non-public)"}
     B -- yes --> C["Compile Expression.New(ctor)<br/>faster than Activator.CreateInstance"]
-    B -- no --> D["RuntimeHelpers.GetUninitializedObject<br/>no constructor runs; properties are<br/>populated directly by the mapper"]
+    B -- no --> D{"Uninitialized creation allowed?<br/>global ObjectConstructionMode or<br/>per-call ambient opt-in"}
+    D -- yes --> E["RuntimeHelpers.GetUninitializedObject<br/>no constructor runs; members are<br/>populated directly by the mapper"]
+    D -- no --> F["MappingException naming the type<br/>and both ways out (default)"]
 ```
 
-The uninitialized fallback is what makes positional records and constructor-validated entities mappable with zero configuration. The trade-off — constructor invariants are bypassed — is documented in the README ("Null safety and instantiation") and covered by `UninitializedFallbackTests`.
+Constructor-less targets are refused by default (`ObjectConstructionMode.RequireParameterlessConstructor`): creating an instance without running its constructor would skip constructor logic, domain invariants and field initializers, which contradicts the fail-loud principle. The uninitialized path is an explicit opt-in — global via `SimpleMapperOptions.ObjectConstruction`, or per call via `MapperBuilder.AllowUninitializedObjects()`.
+
+Two implementation constraints shape this design:
+
+- **The permission is checked at invocation time, not at factory-build time.** Factories are cached per `(source, target)` pair, while the permission can come from a per-call opt-in — a factory that captured the decision at build time would poison the cache for every later call. The constructor-less factory therefore consults the global option and the ambient flag on every instantiation.
+- **The per-call opt-in travels as a `[ThreadStatic]` ambient flag** (`MapperEngine.AllowUninitializedObjectsAmbient`), set for the duration of one `Execute`/`ExecuteInto` call — the same pattern as the recursion depth counter. This covers nested objects and collection items created anywhere inside that mapping without plumbing the config through the cached factories.
+
+The contract is covered by `ObjectConstructionModeTests` (strict default, both opt-ins, thread isolation) and `UninitializedFallbackTests` (behavior under opt-in).
 
 ## Recursion depth guard (CWE-674)
 
@@ -140,7 +149,7 @@ The counter is thread-local, so concurrent mappings on different threads never i
 
 ### Expression trees instead of raw reflection
 
-`PropertyInfo.GetValue`/`SetValue` is roughly two orders of magnitude slower than direct access. Compiled expression trees produce delegates with hand-written-code performance; compilation cost is paid once per type (pair) and amortized across all subsequent calls.
+`PropertyInfo.GetValue`/`SetValue` is roughly two orders of magnitude slower than direct access. Compiled expression trees produce delegates whose invocation cost is comparable to a direct member access (the mapper's remaining overhead lives in cache lookups and plan dispatch — see [benchmarks.md](benchmarks.md) for the honest totals); compilation cost is paid once per type (pair) and amortized across all subsequent calls.
 
 Reference: [Expression Trees (C#)](https://learn.microsoft.com/en-us/dotnet/csharp/advanced-topics/expression-trees/)
 

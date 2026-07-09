@@ -9,8 +9,10 @@ SimpleMapper.Net is an opinionated, MIT-licensed object mapper for .NET that opt
 SimpleMapper.Net exists to improve the day-to-day developer experience of mapping objects, not to be a feature-complete mapping framework. The design is opinionated:
 
 - **Simplicity first.** The common case — copy a DTO, ignore a field, rename another, map a nested graph — should need zero configuration and read like plain code. If a feature would complicate that path, it stays out.
-- **Performance, closely balanced.** Mapping runs through compiled expression trees, so the convenience costs little over hand-written code. Simplicity wins ties, but performance is never an afterthought.
+- **Made for DTO boundaries.** The intended use is DTO to DTO and entity to DTO. Mapping *into* rich domain entities is possible, but it is a conscious trade of encapsulation for convenience: the mapper writes through non-public setters, and creating targets without a parameterless constructor requires an explicit opt-in (see [Object construction](#object-construction)).
+- **Performance in the same order of magnitude.** Mapping runs through compiled expression trees. That is slower than hand-written code or a source generator, and close to AutoMapper — roughly half a microsecond more per call on a 60-property graph (see [Benchmarks](docs/benchmarks.md)). Simplicity wins ties, but performance is never an afterthought.
 - **Small on purpose.** No projections, no flattening conventions, no resolver/converter pipeline, no runtime configuration to validate. Fewer concepts to learn, fewer ways to get it wrong. When you genuinely need those, a heavier mapper is the right tool — see the [trade-offs](#where-automapper-or-another-mapper-is-a-better-fit) below.
+- **JIT-first by design.** The target audience is traditional JIT applications — APIs, monoliths, background services — that value zero-configuration productivity. Mapping code is built at runtime, so SimpleMapper.Net is not the tool for NativeAOT or trimmed deployments; use a source generator such as Mapperly there. The public API carries `[RequiresDynamicCode]`/`[RequiresUnreferencedCode]`, so AOT/trimmed projects get a compile-time warning instead of a runtime surprise.
 
 If you want a mapper that does everything, this isn't it. If you want your DTO mapping to get out of your way, it is.
 
@@ -20,11 +22,11 @@ If you want a mapper that does everything, this isn't it. If you want your DTO m
 - **Fully dynamic**: no profiles, no `CreateMap`, no startup registration. Caches compile lazily on first use.
 - **Bidirectional by nature**: `User -> UserDto` and `UserDto -> User` both work without any setup.
 - **Fluent builder** for per-call overrides: ignore properties, rename properties, navigate deep paths type-safely with lambdas and `Each()`.
-- **Map onto an existing instance**: `dto.MapTo(entity)` applies a DTO onto an object you already have (e.g. a tracked EF entity).
+- **Map onto an existing instance**: `dto.MapTo(entity)` applies a DTO onto an object you already have — keep the DTO flat for tracked EF Core entities (see [Updating tracked EF Core entities](#updating-tracked-ef-core-entities)).
 - **Deep by default**: the mapped object never aliases the source graph — nested objects and collection items are new instances, even when source and target types are identical (dictionaries are the documented exception).
 - **Fail loud**: unmappable members throw `MappingException` naming the property and both types — no silent skips, no zeroed structs, no raw expression-tree errors.
 - **Thread-safe**: all caches are lock-free `ConcurrentDictionary` lookups after first use.
-- **Fast**: compiled expression trees give hand-written-code performance on the hot path — on par with AutoMapper (see [Benchmarks](docs/benchmarks.md)).
+- **Fast, honestly measured**: compiled expression trees keep single mappings in the same order of magnitude as AutoMapper — roughly half a microsecond more per call on a 60-property graph. Hand-written code and source generators are faster; every number is published in [Benchmarks](docs/benchmarks.md).
 - **Debug logging**: print the whole mapping tree to the console — or any `TextWriter` — to diagnose a mapping.
 
 ## Installation
@@ -74,9 +76,10 @@ var obj = user.MapTo(typeof(UserDto));
 List<UserDto> dtos = users.MapListTo<UserDto>();
 
 // Map onto an existing instance (unmatched target members keep their values)
-var entity = await db.Users.FindAsync(id);
-dto.MapTo(entity);
+dto.MapTo(existingUser);
 ```
+
+For updates of EF Core tracked entities, see [Updating tracked EF Core entities](#updating-tracked-ef-core-entities) — the DTO must stay flat.
 
 ## Fluent builder
 
@@ -106,6 +109,12 @@ var dto = user.Map()
 user.Map()
     .Ignore("InternalNotes")
     .To(existingDto);
+
+// Allow targets without a parameterless constructor (this call only) — see
+// "Object construction" below for what this trades away
+var record = user.Map()
+    .AllowUninitializedObjects()
+    .To<UserRecordDto>();
 ```
 
 ### Deep property navigation
@@ -152,7 +161,25 @@ UserDto? dto = ((User?)null).MapTo<UserDto>();  // dto == null
 ```
 
 - A `null` source property is written to the target only when the target property is nullable; non-nullable target properties keep their default value (skip-if-null semantics, driven by nullable reference type annotations).
-- Targets with an accessible parameterless constructor (public or protected) are created through it. Targets without one — positional records, entities with required constructor arguments — are created **without running any constructor** (`RuntimeHelpers.GetUninitializedObject`) and populated property by property. Constructor-enforced invariants are bypassed in that case; keep that in mind for types whose constructors validate.
+- Public properties are written regardless of setter visibility: `private set`, `protected set` and `init` accessors are all filled. This is intentional — it is the same mechanism that fills init-only members of records — but it also means mapping into rich domain entities bypasses their encapsulation (see the [Philosophy](#philosophy)).
+
+### Object construction
+
+Targets with a parameterless constructor — any visibility: public, protected or private — are created through it. Targets without one (positional records, entities with required constructor arguments) are **refused by default**: mapping throws a `MappingException` naming the type, because creating an instance without running its constructor skips constructor logic, domain invariants and field initializers.
+
+If you accept that trade-off — typical for positional records used as DTOs — opt in explicitly:
+
+```csharp
+// Per call: this mapping only, including nested objects and collection items
+var dto = user.Map()
+    .AllowUninitializedObjects()
+    .To<UserRecordDto>();
+
+// Global: every mapping in the process (set it at startup)
+SimpleMapperOptions.ObjectConstruction = ObjectConstructionMode.AllowUninitializedObjects;
+```
+
+Under the opt-in, constructor-less targets are created with `RuntimeHelpers.GetUninitializedObject` and populated member by member — no constructor runs and field initializers are skipped. Keep that in mind for types whose constructors validate.
 
 ### Cyclic graphs and recursion depth
 
@@ -176,6 +203,33 @@ SimpleMapperOptions.MaxDepth = 250; // only if your graph is legitimately deep
 ```
 
 This is the same class of issue as [CVE-2026-32933](https://github.com/advisories/ghsa-rvv3-g6hj-g44x) in AutoMapper; SimpleMapper.Net ships the depth guard by default.
+
+## Updating tracked EF Core entities
+
+`dto.MapTo(entity)` is convenient for applying a request DTO onto a tracked entity, but deep mapping and change tracking interact badly: nested objects and collections on the target are **replaced with new instances**, never merged. On a tracked entity graph that means orphaned children, re-inserted rows and broken navigation fixup.
+
+Keep the DTO **flat** (scalars only) when updating tracked entities, and ignore identity, audit and concurrency members explicitly:
+
+```csharp
+public class UpdateUserDto
+{
+    public string? Name { get; set; }
+    public string? Email { get; set; }
+    // scalars only — no navigation properties, no collections
+}
+
+var entity = await db.Users.FindAsync(id);
+
+dto.Map()
+    .Ignore(nameof(User.Id))         // identity
+    .Ignore(nameof(User.CreatedAt))  // audit
+    .Ignore(nameof(User.RowVersion)) // optimistic concurrency token
+    .To(entity);
+
+await db.SaveChangesAsync();
+```
+
+If the update carries nested objects or collections, map those members by hand — do not deep-map onto a tracked graph.
 
 ## Dependency injection
 
@@ -247,7 +301,7 @@ A future revision will move the registry into an instance/DI-scoped configuratio
 | `IQueryable` projection (`ProjectTo`) to SQL | Not supported — SimpleMapper.Net maps in-memory objects only |
 | Flattening conventions (`Account.Username -> AccountUsername`) | Not supported — names must match, or be renamed explicitly per call |
 | Custom value resolvers / type converters | Not supported — transformation logic belongs in your code before/after mapping |
-| Constructor-based mapping with validation | SimpleMapper.Net bypasses constructors for types without a parameterless one |
+| Constructor-based mapping with validation | Not supported — targets without a parameterless constructor are refused by default; the explicit opt-in creates them without running the constructor |
 | Compile-time generated mappers (zero reflection at runtime) | Consider Mapperly-style source generators |
 | Configuration validation at startup (`AssertConfigurationIsValid`) | There is no configuration to validate — typos in `Map`/`Ignore` strings surface at runtime |
 
@@ -261,6 +315,8 @@ SimpleMapper.Net prefers a loud, named error over silently wrong data. The suppo
 | `T` <-> `T?` and numeric widening (`int -> long`, `float -> double`) | Converted |
 | Incompatible simple types (`string -> double`, `int -> string`, `string -> enum`) | Throws `MappingException` naming the member and both types |
 | Nested object, different or identical types | Deep-mapped (a new instance; the DTO never aliases the source) |
+| Public property with `private`/`protected`/`init` setter | Written (intentional — see [Null safety and instantiation](#null-safety-and-instantiation)) |
+| Target type without a parameterless constructor | Throws `MappingException` by default; created uninitialized under the [`AllowUninitializedObjects` opt-in](#object-construction) |
 | Collection to `T[]`, `List<T>` or any interface a `List<T>` satisfies (`IEnumerable<T>`, `IList<T>`, `ICollection<T>`, `IReadOnlyList<T>`, ...) | Deep-mapped item by item |
 | Collection to `HashSet<T>`, immutable collections, non-generic collections (`ArrayList`) | Throws `MappingException` at plan build |
 | Dictionary | Copied **by reference** (documented exception; not cloned) |
@@ -274,22 +330,30 @@ SimpleMapper.Net prefers a loud, named error over silently wrong data. The suppo
 - Cyclic object graphs are not followed — they throw `MappingDepthExceededException` (see above), they are not resolved into cyclic DTO graphs.
 - Deep `Map`/`Ignore` paths require the source and target paths to have the same depth.
 - The debug path (`WithDebugLogging`) is intentionally slow and allocates; never leave it on in production code.
-- **NativeAOT / trimming**: mapping code is built at runtime with reflection and compiled expression trees. The public API is annotated with `[RequiresDynamicCode]` and `[RequiresUnreferencedCode]`, so AOT/trimmed projects get a compile-time warning: SimpleMapper.Net is not the right tool there — consider a source-generated mapper (e.g. Mapperly).
+- **NativeAOT / trimming**: not supported — mapping code is built at runtime with reflection and compiled expression trees (see the JIT-first note in [Philosophy](#philosophy)). The public API is annotated with `[RequiresDynamicCode]` and `[RequiresUnreferencedCode]` (compiler-verified via the AOT/trim analyzers), so AOT/trimmed projects get a compile-time warning; use a source-generated mapper such as Mapperly there.
 
 ## Performance
 
-Benchmarked with BenchmarkDotNet against AutoMapper 14.0.0 (the last MIT release) over a synthetic content-platform graph (~60 mapped properties, 4-5 nesting levels, collections, dictionary, one polymorphic item). Full methodology, environment and reproduction steps: [docs/benchmarks.md](docs/benchmarks.md).
+Benchmarked with BenchmarkDotNet against a hand-written manual baseline, Mapperly (source generator), AutoMapper 14.0.0 (the last MIT release) and Mapster, over a synthetic content-platform graph (~60 mapped properties, 4-5 nesting levels, collections, dictionary, one polymorphic item) plus flat-DTO, map-into and cold-start scenarios. The goal is parity of magnitude with the runtime mappers, not victory — manual code and source generators are faster, and the tables say so. Full methodology, environment and reproduction steps: [docs/benchmarks.md](docs/benchmarks.md).
 
 <!-- BENCHMARK-SUMMARY:START -->
-Containerized run (Ubuntu Arm64 container, .NET 10.0.9, 1 CPU / 2 GB), v2.0.0:
+Containerized run (Ubuntu Arm64 container, .NET 10.0.9, 1 CPU / 2 GB), v2.1.0:
 
-| Scenario | AutoMapper 14.0.0 | SimpleMapper.Net |
+| Deep graph: Blog -> BlogDto | Mean | Allocated |
 | --- | --- | --- |
-| Single mapping (forward) | 1.601 us / 5.14 KB | 2.238 us / 5.59 KB |
-| Single mapping (reverse) | 1.539 us / 5.14 KB | 2.517 us / 5.59 KB |
-| Batch x100 (forward) | 177.3 us / 514.9 KB | 247.3 us / 560.2 KB |
+| Manual (baseline) | 0.94 us | 4.95 KB |
+| Mapperly 4.3.1 (source generator) | 0.90 us | 3.62 KB |
+| Mapster 10.0.10 | 1.16 us | 4.93 KB |
+| AutoMapper 14.0.0 | 1.62 us | 5.14 KB |
+| SimpleMapper.Net | 2.23 us | 5.59 KB |
 
-Same order of magnitude across the board; single mappings land roughly half a microsecond over AutoMapper per call on this graph, and allocations are unchanged from v1.x — the unified deep-map semantics added no work to the hot path.
+| Scenario | Manual | SimpleMapper.Net | AutoMapper 14.0.0 |
+| --- | --- | --- | --- |
+| Flat DTO (8 scalars) | 9.8 ns | 55.8 ns | 51.2 ns |
+| Map onto existing instance (flat) | 4.7 ns | 29.0 ns | 57.1 ns |
+| Cold start: first deep-graph mapping | no build step | 4.6 ms | 17.7 ms (config + map) |
+
+SimpleMapper.Net costs about 0.6 us more per call than AutoMapper on this graph (2.4x a hand-written mapper), and is roughly 2x faster on map-into and 4x faster on cold start. If your project can adopt a source generator, Mapperly is faster everywhere — that is the honest trade: zero runtime configuration versus compile-time codegen.
 <!-- BENCHMARK-SUMMARY:END -->
 
 Run it yourself, with pinned resources, in one command:

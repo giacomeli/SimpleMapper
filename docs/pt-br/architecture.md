@@ -116,10 +116,19 @@ O cache `HasSubtypeRules` é o que torna gratuita a maioria sem subtipos — e �
 flowchart TD
     A["TypedMapperCache.BuildFactory(type)"] --> B{"Existe construtor sem parametros?<br/>(publico ou nao-publico)"}
     B -- sim --> C["Compila Expression.New(ctor)<br/>mais rapido que Activator.CreateInstance"]
-    B -- nao --> D["RuntimeHelpers.GetUninitializedObject<br/>nenhum construtor executa; as propriedades<br/>sao preenchidas diretamente pelo mapper"]
+    B -- nao --> D{"Criacao uninitialized permitida?<br/>ObjectConstructionMode global ou<br/>opt-in ambiente por chamada"}
+    D -- sim --> E["RuntimeHelpers.GetUninitializedObject<br/>nenhum construtor executa; os membros<br/>sao preenchidos diretamente pelo mapper"]
+    D -- nao --> F["MappingException nomeando o tipo<br/>e as duas saidas (default)"]
 ```
 
-O fallback uninitialized é o que torna records posicionais e entidades com validação no construtor mapeáveis com configuração zero. O trade-off — invariantes de construtor são puladas — está documentado no README ("Null safety e instanciação") e coberto por `UninitializedFallbackTests`.
+Alvos sem construtor sem parâmetros são recusados por default (`ObjectConstructionMode.RequireParameterlessConstructor`): criar uma instância sem executar o construtor pularia a lógica do construtor, invariantes de domínio e inicializadores de campo, o que contradiz o princípio fail-loud. O caminho uninitialized é opt-in explícito — global via `SimpleMapperOptions.ObjectConstruction`, ou por chamada via `MapperBuilder.AllowUninitializedObjects()`.
+
+Duas restrições de implementação moldam esse design:
+
+- **A permissão é checada na invocação, não na construção da factory.** As factories são cacheadas por par `(source, target)`, enquanto a permissão pode vir de um opt-in por chamada — uma factory que capturasse a decisão no build envenenaria o cache para todas as chamadas seguintes. A factory sem construtor, portanto, consulta a opção global e a flag ambiente a cada instanciação.
+- **O opt-in por chamada viaja como flag ambiente `[ThreadStatic]`** (`MapperEngine.AllowUninitializedObjectsAmbient`), ligada pela duração de um `Execute`/`ExecuteInto` — o mesmo padrão do contador de profundidade de recursão. Isso cobre objetos aninhados e itens de coleção criados em qualquer ponto daquele mapeamento sem fazer plumbing da config pelas factories cacheadas.
+
+O contrato é coberto por `ObjectConstructionModeTests` (default estrito, os dois opt-ins, isolamento por thread) e `UninitializedFallbackTests` (comportamento sob opt-in).
 
 ## Guard de profundidade de recursão (CWE-674)
 
@@ -142,7 +151,7 @@ O contador é thread-local, então mapeamentos concorrentes em threads diferente
 
 ### Expression trees em vez de reflection pura
 
-`PropertyInfo.GetValue`/`SetValue` é aproximadamente duas ordens de magnitude mais lento que acesso direto. Expression trees compiladas produzem delegates com performance de código escrito à mão; o custo de compilação é pago uma vez por (par de) tipo e amortizado em todas as chamadas seguintes.
+`PropertyInfo.GetValue`/`SetValue` é aproximadamente duas ordens de magnitude mais lento que acesso direto. Expression trees compiladas produzem delegates cujo custo de invocação é comparável a um acesso direto de membro (o overhead restante do mapper vive nos lookups de cache e no despacho de plano — veja [benchmarks.md](benchmarks.md) para os totais honestos); o custo de compilação é pago uma vez por (par de) tipo e amortizado em todas as chamadas seguintes.
 
 Referência: [Expression Trees (C#)](https://learn.microsoft.com/en-us/dotnet/csharp/advanced-topics/expression-trees/)
 

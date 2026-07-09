@@ -4,6 +4,51 @@ All notable changes to SimpleMapper.Net are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-07-08
+
+Pre-announcement hardening release. Contains one **BREAKING** behavior change,
+shipped as a minor on purpose: 2.0.0 was published a day earlier and has no
+meaningful installed base, and the safe default matters more than a burned
+major. After public announcement, observable behavior changes follow strict
+SemVer.
+
+### Changed (BREAKING)
+
+- **Targets without a parameterless constructor are now refused by default.**
+  Mapping to such a type (positional records, entities with required
+  constructor arguments) throws `MappingException` naming the type, instead of
+  silently creating the instance with `GetUninitializedObject` — which skips
+  constructor logic, domain invariants and field initializers. The previous
+  behavior is available behind an explicit opt-in:
+  - global: `SimpleMapperOptions.ObjectConstruction = ObjectConstructionMode.AllowUninitializedObjects`;
+  - per call: `source.Map().AllowUninitializedObjects().To<T>()` — covers the
+    root target plus every nested object and collection item of that mapping,
+    without leaking to other calls or threads.
+
+### Added
+
+- `ObjectConstructionMode` enum and `SimpleMapperOptions.ObjectConstruction`
+  option (default `RequireParameterlessConstructor`).
+- `MapperBuilder.AllowUninitializedObjects()`: per-call construction opt-in.
+- AOT/trim analyzers (`EnableAotAnalyzer`, `EnableTrimAnalyzer`) on the library
+  build: the `[RequiresDynamicCode]`/`[RequiresUnreferencedCode]` annotations
+  are now compiler-verified instead of hand-maintained.
+- Benchmarks: hand-written manual baseline, Mapperly (source generator) and
+  Mapster comparators; new flat-DTO, map-into-existing and cold-start
+  (first-mapping, including plan build and expression compile) scenarios.
+- Tests pinning the non-public setter contract (`private set`, `protected set`
+  and `init` accessors are written on purpose — same mechanism that fills
+  init-only record members).
+
+### Documentation
+
+- README: intended-use positioning (DTO boundaries; mapping into rich domain
+  entities is a conscious encapsulation trade-off), JIT-first/NativeAOT stance
+  moved into Philosophy, safe EF Core update guidance (flat DTOs, explicit
+  `.Ignore()` for identity/audit/concurrency, never deep-map onto a tracked
+  graph), and performance claims replaced with concrete benchmark numbers
+  against a manual baseline.
+
 ## [2.0.0] - 2026-07-07
 
 Major version: mapping semantics changed (deep-by-default, no aliasing) and
