@@ -1,10 +1,14 @@
+<p align="center">
+  <img src="promo-assets/simplemapper-net-dotnet-object-mapper-1280x640.png" alt="SimpleMapper.Net — mapeador objeto-objeto de configuração zero para .NET, alternativa ao AutoMapper sob licença MIT" width="800">
+</p>
+
 # SimpleMapper.Net
 
 [![NuGet](https://img.shields.io/nuget/v/SimpleMapper.Net.svg)](https://www.nuget.org/packages/SimpleMapper.Net/)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/SimpleMapper.Net.svg)](https://www.nuget.org/packages/SimpleMapper.Net/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> Tradução em português brasileiro. O documento canônico é o [README.md](../../README.md) em inglês.
+> Tradução em português brasileiro. O documento canônico é o [README.md](README.md) em inglês.
 
 Um mapeador objeto-objeto simples e de configuração zero para .NET. Mapeamento por convenção de nomes com expression trees compiladas, builder fluente para ajustes por chamada e uma única dependência leve (`Microsoft.Extensions.DependencyInjection.Abstractions`).
 
@@ -16,7 +20,7 @@ O SimpleMapper.Net existe para melhorar a experiência do desenvolvedor no dia a
 
 - **Simplicidade primeiro.** O caso comum — copiar um DTO, ignorar um campo, renomear outro, mapear um grafo aninhado — deve precisar de zero configuração e ler como código comum. Se uma feature complicaria esse caminho, ela fica de fora.
 - **Feito para fronteiras de DTO.** O uso pretendido é DTO para DTO e entidade para DTO. Mapear *para dentro* de entidades ricas de domínio é possível, mas é uma troca consciente de encapsulamento por conveniência: o mapper escreve através de setters não-públicos, e criar targets sem construtor sem parâmetros exige opt-in explícito (ver [Construção de objetos](#construção-de-objetos)).
-- **Performance na mesma ordem de grandeza.** O mapeamento roda por expression trees compiladas. Isso é mais lento que código escrito à mão ou um source generator, e próximo do AutoMapper — cerca de meio microssegundo a mais por chamada num grafo de 60 propriedades (ver [Benchmarks](benchmarks.md)). A simplicidade vence os empates, mas a performance nunca é uma reflexão tardia.
+- **Performance na mesma ordem de grandeza.** O mapeamento roda por expression trees compiladas. Isso é mais lento que código escrito à mão ou um source generator, e próximo do AutoMapper — cerca de meio microssegundo a mais por chamada num grafo de 60 propriedades (ver [Benchmarks](docs/pt-br/benchmarks.md)). A simplicidade vence os empates, mas a performance nunca é uma reflexão tardia.
 - **Pequeno de propósito.** Sem projeções, sem convenções de flattening, sem pipeline de resolvers/converters, sem configuração em runtime para validar. Menos conceitos para aprender, menos formas de errar. Quando você realmente precisa disso, um mapper mais pesado é a ferramenta certa — veja os [trade-offs](#onde-o-automapper-ou-outro-mapper-é-melhor-escolha) abaixo.
 - **JIT-first por design.** O público-alvo são aplicações JIT tradicionais — APIs, monólitos, serviços de background — que valorizam produtividade com configuração zero. O código de mapeamento é construído em runtime, então o SimpleMapper.Net não é a ferramenta para deployments NativeAOT ou trimmed; use um source generator como o Mapperly nesses casos. A API pública carrega `[RequiresDynamicCode]`/`[RequiresUnreferencedCode]`, então projetos AOT/trimmed recebem um warning em tempo de compilação em vez de uma surpresa em runtime.
 
@@ -32,7 +36,7 @@ Se você quer um mapper que faz tudo, não é este. Se você quer que o mapeamen
 - **Profundo por padrão**: o objeto mapeado nunca compartilha referências com o grafo de origem — objetos aninhados e itens de coleção são instâncias novas, mesmo quando os tipos de origem e destino são idênticos (dicionários são a exceção documentada).
 - **Falha alto**: membros não mapeáveis lançam `MappingException` com o nome da propriedade e os dois tipos — sem skips silenciosos, sem structs zeradas, sem erros crus de expression tree.
 - **Thread-safe**: todos os caches são lookups lock-free em `ConcurrentDictionary` após o primeiro uso.
-- **Rápido, medido com honestidade**: expression trees compiladas mantêm mapeamentos únicos na mesma ordem de grandeza do AutoMapper — cerca de meio microssegundo a mais por chamada num grafo de 60 propriedades. Código escrito à mão e source generators são mais rápidos; todos os números estão publicados em [Benchmarks](benchmarks.md).
+- **Rápido, medido com honestidade**: expression trees compiladas mantêm mapeamentos únicos na mesma ordem de grandeza do AutoMapper — cerca de meio microssegundo a mais por chamada num grafo de 60 propriedades. Código escrito à mão e source generators são mais rápidos; todos os números estão publicados em [Benchmarks](docs/pt-br/benchmarks.md).
 - **Debug logging**: imprime a árvore completa de mapeamento no console — ou em qualquer `TextWriter` — para diagnosticar um mapeamento.
 
 ## Instalação
@@ -343,7 +347,7 @@ O SimpleMapper.Net prefere um erro alto e nomeado a dados silenciosamente errado
 
 ## Performance
 
-Medido com BenchmarkDotNet contra uma baseline manual escrita à mão, Mapperly (source generator), AutoMapper 14.0.0 (última versão MIT) e Mapster, sobre um grafo sintético de plataforma de conteúdo (~60 propriedades mapeadas, 4-5 níveis de aninhamento, coleções, dicionário, um item polimórfico) mais cenários de DTO plano, map-into e cold start. O objetivo é paridade de ordem de grandeza com os mappers de runtime, não vitória — código manual e source generators são mais rápidos, e as tabelas dizem isso. Metodologia completa, ambiente e reprodução: [benchmarks.md](benchmarks.md).
+Medido com BenchmarkDotNet contra uma baseline manual escrita à mão, Mapperly (source generator), AutoMapper 14.0.0 (última versão MIT) e Mapster, sobre um grafo sintético de plataforma de conteúdo (~60 propriedades mapeadas, 4-5 níveis de aninhamento, coleções, dicionário, um item polimórfico) mais cenários de DTO plano, map-into e cold start. O objetivo é paridade de ordem de grandeza com os mappers de runtime, não vitória — código manual e source generators são mais rápidos, e as tabelas dizem isso. Metodologia completa, ambiente e reprodução: [benchmarks.md](docs/pt-br/benchmarks.md).
 
 <!-- BENCHMARK-SUMMARY:START -->
 Execução containerizada (container Ubuntu Arm64, .NET 10.0.9, 1 CPU / 2 GB), v2.1.0:
@@ -373,9 +377,10 @@ docker compose -f docker-compose.benchmarks.yml up --build
 
 ## Documentação
 
-- [Arquitetura e internals](architecture.md)
-- [Benchmarks: metodologia e resultados](benchmarks.md)
-- Original em inglês: [README.md](../../README.md), [docs/](../)
+- [Arquitetura e internals](docs/pt-br/architecture.md)
+- [Benchmarks: metodologia e resultados](docs/pt-br/benchmarks.md)
+- [Changelog](CHANGELOG.md)
+- Original em inglês: [README.md](README.md), [docs/](docs/)
 
 ## Contribuindo
 
@@ -397,14 +402,14 @@ dotnet test SimpleMapper.Net.slnx               # precisa estar verde
 - **Testes passam.** `dotnet test` verde e o build em Release com zero warnings.
 - **Teste primeiro.** Novas features e correções vêm com testes, escritos antes da implementação. Uma correção de bug deve incluir um teste que falha sem a sua mudança e passa com ela.
 - **API pública documentada.** Todo tipo e membro público carrega um comentário XML doc (o build exige isso).
-- **Inglês, com espelhos pt-BR.** Código, comentários, mensagens de exceção e a documentação principal são em inglês. Se você mudar comportamento ou a API pública, atualize `README.md` / `docs/` e espelhe em `docs/pt-br/`.
+- **Inglês, com espelhos pt-BR.** Código, comentários, mensagens de exceção e a documentação principal são em inglês. Se você mudar comportamento ou a API pública, atualize `README.md` / `docs/` e espelhe em `README.pt-BR.md` / `docs/pt-br/`.
 - **Mudanças de performance vêm com benchmarks.** Qualquer PR que alegue melhoria de tempo ou alocação — ou que toque no engine ou no fast path — deve incluir números antes/depois da execução containerizada (`docker compose -f docker-compose.benchmarks.yml up --build`). "Parece mais rápido" não é um benchmark.
 - **Tamanho razoável.** Mantenha os pull requests pequenos e revisáveis. PRs muito grandes ou espalhados não serão aceitos — divida em pedaços focados.
 - **Commits.** Conventional Commits em inglês (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `perf:`, `test:`), modo imperativo. Usar IA para ajudar a escrever a mudança é ok; a mensagem de commit em si fica sem atribuição de IA ou trailers `Co-Authored-By`.
 
 ### Boas práticas
 
-- **Mantenha o caso comum no fast path.** O caminho de mapeamento sem configuração é onde vive a performance. Se você tocar em `MapperEngine` ou nos caches, rode os benchmarks (`docker compose -f docker-compose.benchmarks.yml up --build`) e confirme que não há regressão. Veja [architecture.md](architecture.md) para entender os paths de execução e o check `useFast`.
+- **Mantenha o caso comum no fast path.** O caminho de mapeamento sem configuração é onde vive a performance. Se você tocar em `MapperEngine` ou nos caches, rode os benchmarks (`docker compose -f docker-compose.benchmarks.yml up --build`) e confirme que não há regressão. Veja [architecture.md](docs/pt-br/architecture.md) para entender os paths de execução e o check `useFast`.
 - **Fique no escopo.** Não reformate código não relacionado e siga o estilo ao redor.
 - **Proteja a filosofia.** Uma feature que complica o caso comum, ou puxa a lib para "fazer tudo", provavelmente será recusada — isso é intencional. Na dúvida, proponha numa issue antes de escrever código.
 - **Discuta mudanças maiores antes.** Mudanças na API pública, novas dependências e qualquer coisa que toque no registro de subtipos (`SMEXP001`) são melhor combinadas numa issue.
@@ -445,4 +450,4 @@ dotnet nuget push src/SimpleMapper.Net/bin/Release/SimpleMapper.Net.1.0.0.nupkg 
 
 ## Licença
 
-[MIT](../../LICENSE) — Juliano Giacomeli
+[MIT](LICENSE) — Juliano Giacomeli

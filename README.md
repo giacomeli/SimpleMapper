@@ -8,6 +8,8 @@
 [![NuGet Downloads](https://img.shields.io/nuget/dt/SimpleMapper.Net.svg)](https://www.nuget.org/packages/SimpleMapper.Net/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+> Leia esta documentação em português brasileiro: [README.pt-BR.md](README.pt-BR.md)
+
 A simple, zero-configuration object-to-object mapper for .NET. Convention-based mapping powered by compiled expression trees, with a fluent builder for per-call overrides and a single lightweight dependency (`Microsoft.Extensions.DependencyInjection.Abstractions`).
 
 SimpleMapper.Net is an opinionated, MIT-licensed object mapper for .NET that optimizes for one thing: making the common mapping case effortless. It is a deliberately simpler, open-source alternative to AutoMapper — it does not try to solve everything AutoMapper solves, and that is the point.
@@ -377,7 +379,7 @@ docker compose -f docker-compose.benchmarks.yml up --build
 - [Architecture and internals](docs/architecture.md)
 - [Benchmarks: methodology and results](docs/benchmarks.md)
 - [Changelog](CHANGELOG.md)
-- Portuguese (pt-BR) translations: [docs/pt-br/](docs/pt-br/)
+- Portuguese (pt-BR) translations: [README.pt-BR.md](README.pt-BR.md) and [docs/pt-br/](docs/pt-br/)
 
 ## Contributing
 
@@ -399,7 +401,7 @@ dotnet test SimpleMapper.Net.slnx               # must be green
 - **Tests pass.** `dotnet test` is green and the Release build has zero warnings.
 - **Test-first.** New features and bug fixes ship with tests, written before the implementation. A bug fix must include a test that fails without your change and passes with it.
 - **Public API is documented.** Every public type and member carries an XML doc comment (the build enforces this).
-- **English, with pt-BR mirrors.** Code, comments, exception messages and the primary docs are in English. If you change behavior or the public API, update `README.md` / `docs/` and mirror it in `docs/pt-br/`.
+- **English, with pt-BR mirrors.** Code, comments, exception messages and the primary docs are in English. If you change behavior or the public API, update `README.md` / `docs/` and mirror it in `README.pt-BR.md` / `docs/pt-br/`.
 - **Performance changes include benchmarks.** Any PR that claims a speed or allocation improvement — or that touches the engine or the fast path — must include before/after numbers from the containerized run (`docker compose -f docker-compose.benchmarks.yml up --build`). "It feels faster" is not a benchmark.
 - **Reasonable size.** Keep pull requests small and reviewable. Very large or sprawling PRs will not be accepted — split them into focused pieces.
 - **Commits.** Conventional Commits in English (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `perf:`, `test:`), imperative mood. Using AI to help write the change is fine; the commit message itself stays free of AI attribution or `Co-Authored-By` trailers.

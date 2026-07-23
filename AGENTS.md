@@ -9,7 +9,7 @@ Guidance for AI coding agents working in this repository.
 ## Language conventions
 
 - **Project language is English**: code, XML doc comments, exception messages, README and everything under `docs/`.
-- `docs/pt-br/` holds Brazilian Portuguese translations; the English originals are canonical. When you change behavior or API, update the English docs **and** their pt-br mirrors.
+- `README.pt-BR.md` (repo root) and `docs/pt-br/` hold Brazilian Portuguese translations; the English originals are canonical. When you change behavior or API, update the English docs **and** their pt-br mirrors.
 - Internal planning artifacts under `specs/` are written in pt-BR and are git-ignored.
 - No emojis in any artifact (code, docs, commits). Use `->` instead of arrow glyphs in strings and comments. Diagrams are Mermaid, never ASCII art.
 - **Commit messages are in English**, following Conventional Commits (`feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `perf:`, `test:`), imperative mood, first line under ~72 chars with no trailing period. Never add AI credits, `Co-Authored-By` trailers or tool attributions.
@@ -22,7 +22,7 @@ Guidance for AI coding agents working in this repository.
 | `src/SimpleMapper.Net/` | The library (PackageId `SimpleMapper.Net`, multi-targets `net8.0;net10.0`, MIT) |
 | `tests/SimpleMapper.Net.Tests/` | xUnit; 56 tests; multi-targets `net8.0;net10.0`; `InternalsVisibleTo` grants access to internal types |
 | `benchmarks/SimpleMapper.Net.Benchmarks/` | BenchmarkDotNet vs manual baseline, Mapperly, AutoMapper 14.0.0 (last MIT version) and Mapster — all benchmark-only dependencies |
-| `docs/` | `architecture.md`, `benchmarks.md` (EN) + `pt-br/` translations |
+| `docs/` | `architecture.md`, `benchmarks.md` (EN) + `pt-br/` translations (README translation lives at `README.pt-BR.md` in the root) |
 
 ```bash
 dotnet build SimpleMapper.Net.slnx -c Release   # zero warnings is the bar
@@ -81,5 +81,5 @@ Before considering a change done:
 1. `dotnet build SimpleMapper.Net.slnx -c Release` — no errors and **no warnings**.
 2. `dotnet test SimpleMapper.Net.slnx -c Release` — suite green.
 3. Touched the engine/fast path? Run the benchmarks and compare against `benchmarks/results/`.
-4. Changed behavior or API? Update `README.md` + `docs/` **and** the mirrors in `docs/pt-br/`.
+4. Changed behavior or API? Update `README.md` + `docs/` **and** the mirrors in `README.pt-BR.md` / `docs/pt-br/`.
 5. Never commit or push without an explicit request from the user.
