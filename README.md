@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="promo-assets/simplemapper-net-dotnet-object-mapper-1280x640.png" alt="SimpleMapper.Net — zero-configuration object-to-object mapper for .NET, an MIT-licensed AutoMapper alternative" width="800">
+</p>
+
 # SimpleMapper.Net
 
 [![NuGet](https://img.shields.io/nuget/v/SimpleMapper.Net.svg)](https://www.nuget.org/packages/SimpleMapper.Net/)
