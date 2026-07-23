@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repository.
 
 ## What this repository is
 
-**SimpleMapper.Net** — a NuGet library for object-to-object mapping in .NET, an MIT-licensed alternative to AutoMapper. Convention-based mapping with compiled expression trees, a fluent builder for per-call overrides, and a single dependency (`Microsoft.Extensions.DependencyInjection.Abstractions`).
+**SimpleMapper.Net** — a NuGet library ([nuget.org/packages/SimpleMapper.Net](https://www.nuget.org/packages/SimpleMapper.Net/)) for object-to-object mapping in .NET, an MIT-licensed alternative to AutoMapper. Convention-based mapping with compiled expression trees, a fluent builder for per-call overrides, and a single dependency (`Microsoft.Extensions.DependencyInjection.Abstractions`).
 
 ## Language conventions
 

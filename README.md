@@ -1,5 +1,9 @@
 # SimpleMapper.Net
 
+[![NuGet](https://img.shields.io/nuget/v/SimpleMapper.Net.svg)](https://www.nuget.org/packages/SimpleMapper.Net/)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/SimpleMapper.Net.svg)](https://www.nuget.org/packages/SimpleMapper.Net/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A simple, zero-configuration object-to-object mapper for .NET. Convention-based mapping powered by compiled expression trees, with a fluent builder for per-call overrides and a single lightweight dependency (`Microsoft.Extensions.DependencyInjection.Abstractions`).
 
 SimpleMapper.Net is an opinionated, MIT-licensed object mapper for .NET that optimizes for one thing: making the common mapping case effortless. It is a deliberately simpler, open-source alternative to AutoMapper — it does not try to solve everything AutoMapper solves, and that is the point.
@@ -30,6 +34,8 @@ If you want a mapper that does everything, this isn't it. If you want your DTO m
 - **Debug logging**: print the whole mapping tree to the console — or any `TextWriter` — to diagnose a mapping.
 
 ## Installation
+
+The package is published on NuGet: [nuget.org/packages/SimpleMapper.Net](https://www.nuget.org/packages/SimpleMapper.Net/)
 
 ```bash
 dotnet add package SimpleMapper.Net

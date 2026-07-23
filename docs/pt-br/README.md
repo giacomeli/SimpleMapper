@@ -1,5 +1,9 @@
 # SimpleMapper.Net
 
+[![NuGet](https://img.shields.io/nuget/v/SimpleMapper.Net.svg)](https://www.nuget.org/packages/SimpleMapper.Net/)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/SimpleMapper.Net.svg)](https://www.nuget.org/packages/SimpleMapper.Net/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+
 > Tradução em português brasileiro. O documento canônico é o [README.md](../../README.md) em inglês.
 
 Um mapeador objeto-objeto simples e de configuração zero para .NET. Mapeamento por convenção de nomes com expression trees compiladas, builder fluente para ajustes por chamada e uma única dependência leve (`Microsoft.Extensions.DependencyInjection.Abstractions`).
@@ -32,6 +36,8 @@ Se você quer um mapper que faz tudo, não é este. Se você quer que o mapeamen
 - **Debug logging**: imprime a árvore completa de mapeamento no console — ou em qualquer `TextWriter` — para diagnosticar um mapeamento.
 
 ## Instalação
+
+O pacote é publicado no NuGet: [nuget.org/packages/SimpleMapper.Net](https://www.nuget.org/packages/SimpleMapper.Net/)
 
 ```bash
 dotnet add package SimpleMapper.Net
