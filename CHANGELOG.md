@@ -4,6 +4,19 @@ All notable changes to [SimpleMapper.Net](https://www.nuget.org/packages/SimpleM
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.1] - 2026-10-06
+
+### Fixed
+
+- **`Nullable<T>` source onto a non-nullable value target no longer throws on
+  the typed fast path.** Mapping `int?` -> `int` (or `int?` -> `long`) with a
+  null source threw `InvalidOperationException: Nullable object must have a
+  value` when the pair was compiled by the fast path, including collection
+  items and nested objects. It now follows the documented skip-if-null
+  semantics, as the plan-based path already did: a null source is skipped and
+  the target keeps its default. Non-null values are copied (with numeric
+  widening) as before. Covered by `NullableToNonNullableTests`.
+
 ## [2.1.0] - 2026-07-08
 
 Pre-announcement hardening release. Contains one **BREAKING** behavior change,
