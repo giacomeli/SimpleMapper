@@ -157,6 +157,7 @@ internal static class TypedPlanBuilder
         return BuildComplexAssignment(srcAccess, tgtAccess, srcMemberType, tgtMemberType);
     }
 
+    [RequiresUnreferencedCode(SimpleMapperExtensions.TrimWarning)]
     private static Expression BuildSimpleAssignment(
         Expression srcAccess, MemberExpression tgtAccess,
         Type srcMemberType, Type tgtMemberType)
@@ -170,6 +171,17 @@ internal static class TypedPlanBuilder
         // Nullable<T> source -> T target or Nullable<T> target
         var srcUnderlying = Nullable.GetUnderlyingType(srcMemberType);
         var tgtUnderlying = Nullable.GetUnderlyingType(tgtMemberType);
+
+        // Nullable<T> source -> non-nullable value target (int? -> int, int? -> long): skip-if-null,
+        // the target keeps its default. A plain Convert would throw "Nullable object must have a value".
+        if (srcUnderlying != null && tgtUnderlying == null && tgtMemberType.IsValueType)
+        {
+            var value = Expression.Property(srcAccess, nameof(Nullable<int>.Value));
+            return Expression.IfThen(
+                Expression.Property(srcAccess, nameof(Nullable<int>.HasValue)),
+                Expression.Assign(tgtAccess,
+                    srcUnderlying == tgtMemberType ? value : Expression.Convert(value, tgtMemberType)));
+        }
 
         // Both are the same underlying type (e.g. int? -> int? or int -> int?)
         var srcCore = srcUnderlying ?? srcMemberType;
