@@ -514,7 +514,9 @@ internal static class MapperEngine
                 {
                     foreach (var rule in rules)
                     {
-                        if (rule.Discriminator(source))
+                        // A rule only applies when its target fits the requested target: a rule
+                        // registered for DTO -> model must not hijack a DTO -> DTO copy.
+                        if (requestedTargetType.IsAssignableFrom(rule.TargetType) && rule.Discriminator(source))
                         {
                             HasSubtypeRules.TryAdd(srcType, true);
                             return rule.TargetType;
