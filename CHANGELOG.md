@@ -4,6 +4,19 @@ All notable changes to [SimpleMapper.Net](https://www.nuget.org/packages/SimpleM
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.2] - 2026-10-07
+
+### Fixed
+
+- **Subtype rules no longer apply when their target does not fit the requested
+  target.** A rule registered for one direction (for example `RegisterSubtype<PostDto>(s => s
+  is VideoPostDto, typeof(VideoPost))`, DTO -> model) was also picked for a copy in
+  another direction (`videoPostDto.MapTo<PostDto>()`, DTO -> DTO), producing the model
+  subtype and failing with `InvalidCastException`. A rule is now used only when its
+  target type is assignable to the requested target type (top level, collection items
+  and nested properties); otherwise the requested type is mapped as before. Covered by
+  `SubtypeTests`.
+
 ## [2.1.1] - 2026-10-06
 
 ### Fixed
